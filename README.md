@@ -1,6 +1,6 @@
 # AirenoOS Plugin Suite
 
-> CAD/BIM metadata extraction and identity sync plugins for **AutoCAD**, **Revit**, and **BricsCAD** — built for the [AirenoOS](https://airenos.io) renovation project management platform.
+> CAD/BIM metadata extraction and identity sync plugins for **AutoCAD**, **Revit**, and **BricsCAD** — built for the AirenoOS renovation project management platform.
 
 ---
 
@@ -24,7 +24,6 @@ airenos-plugin-suite/
 ├── autocad-plugin/       # AutoCAD .NET plugin (C#) — Phase 1 & 2
 ├── revit-plugin/         # Revit API plugin (C#) — Phase 1 & 2
 ├── bricscad-plugin/      # BricsCAD .NET plugin (C#) — Phase 1 & 2
-└── docs/                 # Technical specs, schema reference, project notes
 ```
 
 ---
@@ -139,8 +138,3 @@ Data collection happens **synchronously** during the save event. The HTTP POST f
 - 3D web visualization — Three.js, WebGL
 - Azure cloud services — Functions, Blob Storage, Azure AD / Entra ID
 - .NET / Azure backend integration
-
-**Links:**
-- GitHub: [github.com/zclabs-vn](https://github.com/zclabs-vn)
-- Website: [zclabs.net](https://zclabs.net) *(in development)*
-- Contact: cuon
