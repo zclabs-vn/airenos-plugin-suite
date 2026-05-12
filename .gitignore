@@ -1,0 +1,16 @@
+# Internal docs — not for public repo
+docs/
+
+# Build outputs
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local scripts
+setup-git.ps1
