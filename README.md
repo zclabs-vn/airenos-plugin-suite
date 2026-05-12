@@ -1,1 +1,1 @@
-# airenos-plugin-suite
+# AirenoOS Plugin Suit
