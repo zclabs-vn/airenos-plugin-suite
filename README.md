@@ -33,11 +33,11 @@ airenos-plugin-suite/
 
 ## Platform Support
 
-| Platform  | Versions       | Runtime  | Status          |
-|-----------|----------------|----------|-----------------|
-| AutoCAD   | 2025 / 2026    | .NET 8   | In development  |
-| Revit     | 2025 / 2026    | .NET 8   | In development  |
-| BricsCAD  | V26            | .NET 8   | In development  |
+| Platform  | Versions              | Runtime                    | Status          |
+|-----------|-----------------------|----------------------------|-----------------|
+| AutoCAD   | 2024 / 2025 / 2026    | .NET Fx 4.8 / .NET 8       | In development  |
+| Revit     | 2024 / 2025 / 2026    | .NET Fx 4.8 / .NET 8       | In development  |
+| BricsCAD  | V26                   | .NET 8                     | In development  |
 
 ---
 
@@ -145,8 +145,4 @@ Data collection happens **synchronously** during the save event. The HTTP POST f
 **Links:**
 - GitHub: [github.com/zclabs-vn](https://github.com/zclabs-vn)
 - Website: [zclabs.net](https://zclabs.net) *(in development)*
-- Contact: cuong@zclabs.net · +84 91 357 93 71
-
----
-
-*This plugin suite is under active development as a commercial project for AirenoOS.*
+- Contact: cuon
