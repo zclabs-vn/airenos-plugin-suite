@@ -2,8 +2,6 @@
 
 > CAD/BIM metadata extraction and identity sync plugins for **AutoCAD**, **Revit**, and **BricsCAD** — built for the [AirenoOS](https://airenos.io) renovation project management platform.
 
-Developed by **[ZCLabs Co., Ltd](https://zclabs.net)** · Hanoi, Vietnam
-
 ---
 
 ## Overview
