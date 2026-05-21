@@ -1,0 +1,139 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!--
+    AirenoOS Revit plugin - per-machine MSI.
+
+    Target layout: flat install into each Revit version's all-users Addins folder.
+        %ProgramData%\Autodesk\Revit\Addins\<version>\
+            AirenoOS.Revit.Plugin.addin         (Assembly = AirenoOS.Revit.Plugin.dll)
+            AirenoOS.Revit.Plugin.dll
+            AirenoOS.Revit.Plugin.deps.json     (net8 only)
+            [System.Text.Json + transitive .dlls — net48 only]
+
+    Flat layout keeps the .addin manifest's relative <Assembly> path working
+    without rewrites. The Addins folder is reserved for plugin payloads anyway
+    so binary co-tenancy with other plugins isn't a real risk.
+
+    Each Revit version is its own Feature; users can opt out at install time.
+    UpgradeCode is fixed - bumping ProductVersion triggers a major upgrade
+    that removes the previous build first.
+  -->
+  <Package Name="AirenoOS Revit Plugin"
+           Manufacturer="ZCLabs"
+           Version="1.0.0.0"
+           UpgradeCode="3f2b4a85-9c61-4a8d-92b1-7d8e6f4c1a23"
+           Scope="perMachine"
+           InstallerVersion="500">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of AirenoOS Revit Plugin is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- ProgramData = CommonAppDataFolder in MSI vocabulary. -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="d_Autodesk" Name="Autodesk">
+        <Directory Id="d_AutodeskRevit" Name="Revit">
+          <Directory Id="d_AddinsRoot" Name="Addins">
+            <Directory Id="d_R2024" Name="2024" />
+            <Directory Id="d_R2025" Name="2025" />
+            <Directory Id="d_R2026" Name="2026" />
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ====================================================================
+         Revit 2024 (net48) - bundles System.Text.Json + transitive deps.
+         Listed explicitly so the build fails loud if a new dep appears
+         and we forgot to package it.
+         ==================================================================== -->
+    <ComponentGroup Id="cg_R2024" Directory="d_R2024">
+      <Component Id="c_R2024_addin" Guid="11111111-2024-0001-0001-000000000001">
+        <File Source="..\build\Revit2024\Release\AirenoOS.Revit.Plugin.addin" />
+      </Component>
+      <Component Id="c_R2024_dll" Guid="11111111-2024-0001-0002-000000000002">
+        <File Source="..\build\Revit2024\Release\AirenoOS.Revit.Plugin.dll" />
+      </Component>
+      <Component Id="c_R2024_stj" Guid="11111111-2024-0002-0001-000000000001">
+        <File Source="..\build\Revit2024\Release\System.Text.Json.dll" />
+      </Component>
+      <Component Id="c_R2024_stencodings" Guid="11111111-2024-0002-0002-000000000002">
+        <File Source="..\build\Revit2024\Release\System.Text.Encodings.Web.dll" />
+      </Component>
+      <Component Id="c_R2024_buffers" Guid="11111111-2024-0002-0003-000000000003">
+        <File Source="..\build\Revit2024\Release\System.Buffers.dll" />
+      </Component>
+      <Component Id="c_R2024_memory" Guid="11111111-2024-0002-0004-000000000004">
+        <File Source="..\build\Revit2024\Release\System.Memory.dll" />
+      </Component>
+      <Component Id="c_R2024_numvec" Guid="11111111-2024-0002-0005-000000000005">
+        <File Source="..\build\Revit2024\Release\System.Numerics.Vectors.dll" />
+      </Component>
+      <Component Id="c_R2024_unsafe" Guid="11111111-2024-0002-0006-000000000006">
+        <File Source="..\build\Revit2024\Release\System.Runtime.CompilerServices.Unsafe.dll" />
+      </Component>
+      <Component Id="c_R2024_tasks" Guid="11111111-2024-0002-0007-000000000007">
+        <File Source="..\build\Revit2024\Release\System.Threading.Tasks.Extensions.dll" />
+      </Component>
+      <Component Id="c_R2024_valtup" Guid="11111111-2024-0002-0008-000000000008">
+        <File Source="..\build\Revit2024\Release\System.ValueTuple.dll" />
+      </Component>
+      <Component Id="c_R2024_async" Guid="11111111-2024-0002-0009-000000000009">
+        <File Source="..\build\Revit2024\Release\Microsoft.Bcl.AsyncInterfaces.dll" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Revit 2025 (net8) - System.Text.Json comes from the .NET 8 runtime
+         that Revit ships, so we only need our DLL + deps.json. -->
+    <ComponentGroup Id="cg_R2025" Directory="d_R2025">
+      <Component Id="c_R2025_addin" Guid="22222222-2025-0001-0001-000000000001">
+        <File Source="..\build\Revit2025\Release\AirenoOS.Revit.Plugin.addin" />
+      </Component>
+      <Component Id="c_R2025_dll" Guid="22222222-2025-0001-0002-000000000002">
+        <File Source="..\build\Revit2025\Release\AirenoOS.Revit.Plugin.dll" />
+      </Component>
+      <Component Id="c_R2025_deps" Guid="22222222-2025-0001-0003-000000000003">
+        <File Source="..\build\Revit2025\Release\AirenoOS.Revit.Plugin.deps.json" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Revit 2026 (net8) -->
+    <ComponentGroup Id="cg_R2026" Directory="d_R2026">
+      <Component Id="c_R2026_addin" Guid="33333333-2026-0001-0001-000000000001">
+        <File Source="..\build\Revit2026\Release\AirenoOS.Revit.Plugin.addin" />
+      </Component>
+      <Component Id="c_R2026_dll" Guid="33333333-2026-0001-0002-000000000002">
+        <File Source="..\build\Revit2026\Release\AirenoOS.Revit.Plugin.dll" />
+      </Component>
+      <Component Id="c_R2026_deps" Guid="33333333-2026-0001-0003-000000000003">
+        <File Source="..\build\Revit2026\Release\AirenoOS.Revit.Plugin.deps.json" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ====================================================================
+         Features - each Revit version optional via the FeatureTree dialog.
+         ==================================================================== -->
+    <Feature Id="F_Main"
+             Title="AirenoOS Revit Plugin"
+             Description="Core plugin assemblies for all selected Revit versions."
+             Level="1"
+             Display="expand">
+
+      <Feature Id="F_R2024" Title="Revit 2024 support" Level="1">
+        <ComponentGroupRef Id="cg_R2024" />
+      </Feature>
+      <Feature Id="F_R2025" Title="Revit 2025 support" Level="1">
+        <ComponentGroupRef Id="cg_R2025" />
+      </Feature>
+      <Feature Id="F_R2026" Title="Revit 2026 support" Level="1">
+        <ComponentGroupRef Id="cg_R2026" />
+      </Feature>
+    </Feature>
+
+    <ui:WixUI Id="WixUI_FeatureTree" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+
+  </Package>
+</Wix>

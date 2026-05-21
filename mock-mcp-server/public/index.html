@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AirenoOS Mock MCP — Inspector</title>
+  <!-- SweetAlert2 (v11): themed modal + toast — replaces native confirm()/alert() -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.14.5/dist/sweetalert2.all.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2129;
+      --panel-2: #232c36;
+      --border: #2d3741;
+      --text: #d6deeb;
+      --muted: #7a8597;
+      --accent: #7fdbff;
+      --accent-2: #82aaff;
+      --autocad: #d9a157;
+      --bricscad: #6ec77a;
+      --revit: #c878d4;
+      --danger: #ff5874;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 12px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    header .info { color: var(--muted); font-size: 13px; }
+    header .spacer { flex: 1; }
+    header button {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    header button:hover { background: var(--border); }
+    header button.danger { color: var(--danger); }
+
+    /* Source filter chips */
+    .filters {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-left: 16px;
+    }
+    .filter-chip {
+      background: var(--panel-2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      user-select: none;
+    }
+    .filter-chip:hover { background: var(--border); color: var(--text); }
+    .filter-chip.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+    .filter-chip .count {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 0 6px;
+      background: rgba(0,0,0,0.25);
+      border-radius: 8px;
+      font-weight: 500;
+    }
+    .filter-chip.active .count { background: rgba(0,0,0,0.4); }
+    /* Per-source chip tinting (visible only when NOT active) */
+    .filter-chip[data-src="autocad"]:not(.active)  { border-color: rgba(217,161,87,0.4);  color: var(--autocad); }
+    .filter-chip[data-src="bricscad"]:not(.active) { border-color: rgba(110,199,122,0.4); color: var(--bricscad); }
+    .filter-chip[data-src="revit"]:not(.active)    { border-color: rgba(200,120,212,0.4); color: var(--revit); }
+
+    main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+    .list-pane {
+      width: 360px;
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      background: var(--panel);
+    }
+    .list-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .list-item:hover { background: var(--panel-2); }
+    .list-item.active { background: var(--panel-2); border-left: 3px solid var(--accent); padding-left: 13px; }
+    .list-item .source {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-right: 6px;
+    }
+    .source.autocad  { background: rgba(217,161,87,0.2);  color: var(--autocad); }
+    .source.bricscad { background: rgba(110,199,122,0.2); color: var(--bricscad); }
+    .source.revit    { background: rgba(200,120,212,0.2); color: var(--revit); }
+    .source.unknown  { background: rgba(122,133,151,0.2); color: var(--muted); }
+    .list-item .time {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .list-item .stats {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .detail-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .detail-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .detail-header h2 { margin: 0 0 4px 0; font-size: 15px; font-weight: 500; }
+    .detail-header .meta { color: var(--muted); font-size: 12px; }
+    .detail-content {
+      flex: 1;
+      overflow: auto;
+      padding: 16px 20px;
+    }
+    pre {
+      margin: 0;
+      font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .empty {
+      padding: 40px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    /* JSON syntax coloring */
+    .j-key   { color: var(--accent-2); }
+    .j-str   { color: #c3e88d; }
+    .j-num   { color: #f78c6c; }
+    .j-bool  { color: #ff5874; }
+    .j-null  { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AirenoOS Mock MCP Inspector</h1>
+    <span class="info" id="status">connecting…</span>
+    <div class="filters" id="filters">
+      <span class="filter-chip active" data-src="all">All<span class="count" id="count-all">0</span></span>
+      <span class="filter-chip" data-src="autocad">AutoCAD<span class="count" id="count-autocad">0</span></span>
+      <span class="filter-chip" data-src="bricscad">BricsCAD<span class="count" id="count-bricscad">0</span></span>
+      <span class="filter-chip" data-src="revit">Revit<span class="count" id="count-revit">0</span></span>
+    </div>
+    <span class="spacer"></span>
+    <button id="refresh">Refresh</button>
+    <button id="clear" class="danger">Clear all</button>
+  </header>
+  <main>
+    <aside class="list-pane" id="list"></aside>
+    <section class="detail-pane">
+      <div class="detail-header" id="detail-header" style="display:none">
+        <h2 id="detail-title"></h2>
+        <div class="meta" id="detail-meta"></div>
+      </div>
+      <div class="detail-content">
+        <pre id="detail" class="empty">Select a payload from the list to inspect.</pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const els = {
+      list: document.getElementById('list'),
+      detail: document.getElementById('detail'),
+      detailHeader: document.getElementById('detail-header'),
+      detailTitle: document.getElementById('detail-title'),
+      detailMeta: document.getElementById('detail-meta'),
+      status: document.getElementById('status'),
+      refresh: document.getElementById('refresh'),
+      clear: document.getElementById('clear'),
+    };
+
+    let selectedId = null;
+    let activeFilter = 'all';
+    let lastItems = [];
+
+    // Dark-themed SweetAlert2 defaults — matches the inspector palette.
+    const SwalDark = Swal.mixin({
+      background: '#1a2129',
+      color: '#d6deeb',
+      confirmButtonColor: '#7fdbff',
+      cancelButtonColor: '#2d3741',
+      buttonsStyling: true,
+    });
+    const Toast = Swal.mixin({
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false,
+      timer: 2500,
+      timerProgressBar: true,
+      background: '#1a2129',
+      color: '#d6deeb',
+    });
+
+    async function loadList() {
+      try {
+        const res = await fetch('/api/payloads');
+        const items = await res.json();
+        lastItems = items;
+        updateCounts(items);
+        els.status.textContent = `${items.length} payload${items.length === 1 ? '' : 's'}`;
+        renderList(applyFilter(items));
+      } catch (err) {
+        els.status.textContent = 'connection error';
+        Toast.fire({ icon: 'error', title: 'Connection lost' });
+      }
+    }
+
+    function updateCounts(items) {
+      const counts = { all: items.length, autocad: 0, bricscad: 0, revit: 0 };
+      for (const it of items) {
+        const src = (it.summary?.source_software || '').toLowerCase();
+        if (src in counts) counts[src]++;
+      }
+      document.getElementById('count-all').textContent = counts.all;
+      document.getElementById('count-autocad').textContent = counts.autocad;
+      document.getElementById('count-bricscad').textContent = counts.bricscad;
+      document.getElementById('count-revit').textContent = counts.revit;
+    }
+
+    function applyFilter(items) {
+      if (activeFilter === 'all') return items;
+      return items.filter((it) =>
+        (it.summary?.source_software || '').toLowerCase() === activeFilter
+      );
+    }
+
+    function renderList(items) {
+      if (items.length === 0) {
+        const msg = activeFilter === 'all'
+          ? 'No payloads received yet.'
+          : `No ${activeFilter} payloads.`;
+        els.list.innerHTML = `<div class="empty">${msg}</div>`;
+        return;
+      }
+      els.list.innerHTML = items
+        .map((it) => {
+          const src = (it.summary?.source_software || 'unknown').toLowerCase();
+          const time = new Date(it.receivedAt).toLocaleString();
+          const stats = [
+            it.summary?.total_objects != null ? `${it.summary.total_objects} obj` : null,
+            it.summary?.total_rooms ? `${it.summary.total_rooms} rooms` : null,
+            it.summary?.total_annotations ? `${it.summary.total_annotations} ann` : null,
+            it.summary?.total_dimensions ? `${it.summary.total_dimensions} dim` : null,
+            it.summary?.total_hatches ? `${it.summary.total_hatches} hatch` : null,
+          ].filter(Boolean).join(' · ');
+          const trigger = it.summary?.extraction_trigger || '-';
+          return `
+            <div class="list-item ${it.id === selectedId ? 'active' : ''}" data-id="${it.id}">
+              <div>
+                <span class="source ${src}">${src}</span>
+                <span>${escapeHtml(it.summary?.source_software_version || '')}</span>
+              </div>
+              <div class="time">${time} · ${trigger}</div>
+              <div class="stats">${stats || '—'}</div>
+            </div>
+          `;
+        })
+        .join('');
+      els.list.querySelectorAll('.list-item').forEach((node) => {
+        node.addEventListener('click', () => loadDetail(node.dataset.id));
+      });
+    }
+
+    async function loadDetail(id) {
+      selectedId = id;
+      Array.from(els.list.children).forEach((n) =>
+        n.classList.toggle('active', n.dataset.id === id)
+      );
+      try {
+        const res = await fetch(`/api/payloads/${id}`);
+        if (!res.ok) throw new Error('not found');
+        const env = await res.json();
+        els.detailHeader.style.display = 'block';
+        els.detailTitle.textContent = env.id;
+        els.detailMeta.textContent =
+          `received ${new Date(env.received_at).toLocaleString()}  ·  ` +
+          `from ${env.source_ip || 'unknown'}  ·  ` +
+          `token ${env.bearer_token_preview}`;
+        els.detail.classList.remove('empty');
+        els.detail.innerHTML = syntaxHighlight(env.payload);
+      } catch (err) {
+        Toast.fire({ icon: 'error', title: 'Failed to load payload' });
+      }
+    }
+
+    function syntaxHighlight(obj) {
+      const json = JSON.stringify(obj, null, 2);
+      return escapeHtml(json).replace(
+        /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+        (match) => {
+          let cls = 'j-num';
+          if (/^"/.test(match)) cls = /:$/.test(match) ? 'j-key' : 'j-str';
+          else if (/true|false/.test(match)) cls = 'j-bool';
+          else if (/null/.test(match)) cls = 'j-null';
+          return `<span class="${cls}">${match}</span>`;
+        }
+      );
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    document.getElementById('filters').addEventListener('click', (e) => {
+      const chip = e.target.closest('.filter-chip');
+      if (!chip) return;
+      activeFilter = chip.dataset.src;
+      document.querySelectorAll('.filter-chip').forEach((c) =>
+        c.classList.toggle('active', c === chip)
+      );
+      renderList(applyFilter(lastItems));
+    });
+
+    els.refresh.addEventListener('click', loadList);
+    els.clear.addEventListener('click', async () => {
+      const { isConfirmed } = await SwalDark.fire({
+        icon: 'warning',
+        title: 'Clear all payloads?',
+        text: 'Every received payload will be removed from disk. This cannot be undone.',
+        showCancelButton: true,
+        confirmButtonText: 'Yes, clear all',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#ff5874',
+        reverseButtons: true,
+        focusCancel: true,
+      });
+      if (!isConfirmed) return;
+
+      try {
+        const res = await fetch('/api/payloads', { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        selectedId = null;
+        els.detail.textContent = 'Select a payload from the list to inspect.';
+        els.detail.classList.add('empty');
+        els.detailHeader.style.display = 'none';
+        await loadList();
+        Toast.fire({ icon: 'success', title: 'All payloads cleared' });
+      } catch (err) {
+        Toast.fire({ icon: 'error', title: 'Clear failed: ' + err.message });
+      }
+    });
+
+    loadList();
+    setInterval(loadList, 3000); // poll for new payloads
+  </script>
+</body>
+</html>

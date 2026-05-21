@@ -1,0 +1,34 @@
+# Production compose — pulls image pushed from the developer machine.
+# HTTPS routing handled by system-level nginx + Let's Encrypt on the VPS
+# (matching the pattern used by staircraft, draftera, tubep3d, etc.).
+# Container binds to 127.0.0.1 only — nginx fronts the public domain.
+
+name: ${COMPOSE_PROJECT_NAME:-aireno-mock-mcp}
+
+services:
+  mcp:
+    image: ${IMAGE_REPO:-mrbo0911/aireno-mock-mcp}:${IMAGE_TAG:-latest}
+    container_name: ${CONTAINER_PREFIX:-aireno-mock-mcp}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5099
+      DATA_DIR: /app/data
+      MAX_INDEX_SIZE: ${MAX_INDEX_SIZE:-500}
+      # Empty = open mode (any non-empty bearer accepted). Set in .env to lock down.
+      ALLOWED_TOKENS: ${ALLOWED_TOKENS:-}
+    ports:
+      - "127.0.0.1:${HOST_PORT:-5099}:5099"
+    volumes:
+      - payloads:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5099/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  payloads:
+    external: true
+    name: ${PAYLOADS_VOLUME:-aireno_mock_mcp_payloads}

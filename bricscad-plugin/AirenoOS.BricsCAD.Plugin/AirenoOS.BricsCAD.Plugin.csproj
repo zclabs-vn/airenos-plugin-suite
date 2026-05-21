@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>AirenoOS.BricsCAD.Plugin</AssemblyName>
+    <RootNamespace>AirenoOS.BricsCAD.Plugin</RootNamespace>
+    <Version>1.0.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- BricsCAD loads the DLL — do not generate an exe -->
+    <Optimize>true</Optimize>
+    <BricsCADDir Condition="'$(BricsCADDir)' == ''">C:\Program Files\Bricsys\BricsCAD V26 en_US</BricsCADDir>
+  </PropertyGroup>
+
+  <!--
+    BricsCAD V26 .NET API — two managed wrapper DLLs (analogous to AutoCAD's AcMgd + AcDbMgd):
+      BrxMgd.dll  → Bricscad.ApplicationServices, Bricscad.EditorInput, Bricscad.Runtime (CommandMethod, ExtensionApplication)
+      TD_Mgd.dll  → Teigha.DatabaseServices, Teigha.Geometry, Teigha.Runtime, Teigha.GraphicsInterface
+    Bricsys also exposes Bricscad.DatabaseServices etc. as aliases. We import the canonical namespaces in code.
+  -->
+  <ItemGroup>
+    <Reference Include="BrxMgd">
+      <HintPath>$(BricsCADDir)\BrxMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TD_Mgd">
+      <HintPath>$(BricsCADDir)\TD_Mgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>

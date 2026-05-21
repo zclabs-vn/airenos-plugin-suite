@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AirenoOS Revit add-in manifest.
+
+  Install to:  %AppData%\Autodesk\Revit\Addins\<2024|2025|2026>\AirenoOS.Revit.Plugin.addin
+  Assembly:    Same folder as this file (the WiX installer copies both).
+  Same AddInId GUID is shared across Revit versions intentionally - Revit identifies
+  the add-in by GUID, and we want a single logical plugin across versions.
+-->
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>AirenoOS</Name>
+    <Assembly>AirenoOS.Revit.Plugin.dll</Assembly>
+    <AddInId>5e2c1a93-7f4d-4b8c-a16e-08c93f6b1d52</AddInId>
+    <FullClassName>AirenoOS.Revit.Plugin.PluginApplication</FullClassName>
+    <VendorId>AIRENOS</VendorId>
+    <VendorDescription>ZCLabs - AirenoOS</VendorDescription>
+  </AddIn>
+</RevitAddIns>

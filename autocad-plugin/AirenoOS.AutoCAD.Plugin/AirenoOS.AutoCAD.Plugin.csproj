@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+    <AssemblyName>AirenoOS.AutoCAD.Plugin</AssemblyName>
+    <RootNamespace>AirenoOS.AutoCAD.Plugin</RootNamespace>
+    <Version>1.0.0</Version>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Optimize>true</Optimize>
+
+    <!--
+      AutoCAD ships separate ARX builds per major version:
+        2024  → .NET Framework 4.8  (net48 target)
+        2025  → .NET 8              (net8.0-windows target)
+        2026  → .NET 8              (net8.0-windows target — same ARX as 2025)
+      Override these on the command line:  dotnet build -p:AutoCAD2024Dir=...  -p:AutoCAD2025Dir=...
+    -->
+    <AutoCAD2024Dir Condition="'$(AutoCAD2024Dir)' == ''">C:\Program Files\Autodesk\AutoCAD 2024</AutoCAD2024Dir>
+    <AutoCAD2025Dir Condition="'$(AutoCAD2025Dir)' == ''">C:\Program Files\Autodesk\AutoCAD 2025</AutoCAD2025Dir>
+  </PropertyGroup>
+
+  <!--
+    AutoCAD .NET API — three managed wrapper DLLs:
+      AcMgd.dll      → Autodesk.AutoCAD.ApplicationServices.Application
+      AcCoreMgd.dll  → Autodesk.AutoCAD.ApplicationServices.Core, CommandMethod, ExtensionApplication
+      AcDbMgd.dll    → Autodesk.AutoCAD.DatabaseServices, .Geometry, .Runtime
+    Private=false so AutoCAD's own copies are used at runtime (never ship them in the plugin folder).
+  -->
+
+  <!-- net48 → AutoCAD 2024 -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="AcMgd">
+      <HintPath>$(AutoCAD2024Dir)\AcMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcCoreMgd">
+      <HintPath>$(AutoCAD2024Dir)\AcCoreMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcDbMgd">
+      <HintPath>$(AutoCAD2024Dir)\AcDbMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.Net.Http" Version="4.3.4" />
+  </ItemGroup>
+
+  <!-- net8.0-windows → AutoCAD 2025 / 2026 -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <Reference Include="AcMgd">
+      <HintPath>$(AutoCAD2025Dir)\AcMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcCoreMgd">
+      <HintPath>$(AutoCAD2025Dir)\AcCoreMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcDbMgd">
+      <HintPath>$(AutoCAD2025Dir)\AcDbMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>

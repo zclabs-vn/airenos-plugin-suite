@@ -1,0 +1,14 @@
+services:
+  mcp:
+    build: .
+    container_name: aireno-mock-mcp
+    restart: unless-stopped
+    ports:
+      - "5099:5099"
+    environment:
+      PORT: 5099
+      DATA_DIR: /app/data
+      MAX_INDEX_SIZE: 500
+      # ALLOWED_TOKENS: "demo-token-1,demo-token-2"   # uncomment to lock down
+    volumes:
+      - ./data:/app/data

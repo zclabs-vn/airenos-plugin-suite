@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BricsCAD plugin manifest. BricsCAD scans every *.bundle folder under
+  C:\Program Files\Bricsys\ApplicationPlugins\ and auto-NETLOADs each
+  ComponentEntry with LoadOnAppearance="True".
+-->
+<ApplicationPackage
+    SchemaVersion="1.0"
+    AppVersion="1.0.0"
+    Author="ZCLabs"
+    Name="AirenoOS"
+    Description="AirenoOS metadata sync — extracts blocks, layers, dimensions, text on save and POSTs to the MCP endpoint.">
+
+  <CompanyDetails Name="ZCLabs" Url="https://zclabs.vn" Email="admin@zclabs.dev" />
+
+  <Components>
+    <RuntimeRequirements OS="Win64" Platform="BricsCAD" />
+    <ComponentEntry
+        AppName="AirenoOS"
+        ModuleName="./Contents/Windows/AirenoOS.BricsCAD.Plugin.dll"
+        AppDescription="AirenoOS metadata sync"
+        LoadOnAppearance="True"
+        LoadOnCommandInvocation="False" />
+  </Components>
+</ApplicationPackage>

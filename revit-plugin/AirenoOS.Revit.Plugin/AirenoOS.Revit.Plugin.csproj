@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Multi-Revit-version build:
+      Pass /p:RevitVersion=2024 | 2025 | 2026 (default 2026).
+      2024 → .NET Framework 4.8.
+      2025 / 2026 → .NET 8 (windows).
+    Source is shared across all three versions. Differences are gated by REVIT2024 /
+    REVIT2025 / REVIT2026 preprocessor constants where (rarely) needed.
+  -->
+  <PropertyGroup>
+    <RevitVersion Condition="'$(RevitVersion)' == ''">2026</RevitVersion>
+    <TargetFramework Condition="'$(RevitVersion)' == '2024'">net48</TargetFramework>
+    <TargetFramework Condition="'$(RevitVersion)' != '2024'">net8.0-windows</TargetFramework>
+
+    <AssemblyName>AirenoOS.Revit.Plugin</AssemblyName>
+    <RootNamespace>AirenoOS.Revit.Plugin</RootNamespace>
+    <Version>1.0.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Optimize>true</Optimize>
+    <UseWPF>true</UseWPF>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DefineConstants>$(DefineConstants);REVIT$(RevitVersion)</DefineConstants>
+
+    <!-- Per-version output so 2024/2025/2026 builds don't trample each other.
+         Built artefacts live OUTSIDE the project tree (in revit-plugin/build/) so
+         the SDK's default Compile glob doesn't pull AssemblyInfo files from other
+         versions' obj/ folders. The installer (and dev install.ps1) read these. -->
+    <BaseOutputPath>$(MSBuildProjectDirectory)\..\build\Revit$(RevitVersion)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)\..\build\Revit$(RevitVersion)\obj\</BaseIntermediateOutputPath>
+
+    <RevitInstallDir Condition="'$(RevitInstallDir)' == ''">C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitInstallDir>
+
+    <!-- Revit loads add-ins from %AppData%\Autodesk\Revit\Addins\<version>\ -->
+    <RevitAddinsDir>$(AppData)\Autodesk\Revit\Addins\$(RevitVersion)</RevitAddinsDir>
+  </PropertyGroup>
+
+  <!--
+    Revit API references — both DLLs live under RevitInstallDir. CopyLocal must be false:
+    Revit already loads its own copies, and shipping a duplicate causes type-identity
+    clashes ("type X exists in both A and A").
+  -->
+  <ItemGroup>
+    <Reference Include="RevitAPI">
+      <HintPath>$(RevitInstallDir)\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>$(RevitInstallDir)\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <!-- net48 (Revit 2024) ships HttpClient in the framework assembly, not the SDK
+       default. Add the GAC reference explicitly. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.IO.Compression" />
+  </ItemGroup>
+
+  <!-- Bundle .addin manifest next to the DLL so the WiX installer can pick it up. -->
+  <ItemGroup>
+    <None Update="AirenoOS.Revit.Plugin.addin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

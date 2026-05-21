@@ -1,0 +1,4 @@
+_.AIRENO_CONNECT
+test-token-1
+http://localhost:5099/v1/extract
+_.AIRENO_EXTRACT

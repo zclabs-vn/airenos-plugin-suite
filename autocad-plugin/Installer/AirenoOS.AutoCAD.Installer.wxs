@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AirenoOS AutoCAD Plugin — WiX 5 installer.
+  Builds a per-user MSI that drops the .bundle folder into
+    %APPDATA%\Autodesk\ApplicationPlugins\AirenoOS.bundle\
+  AutoCAD 2024/2025/2026 autoloader picks it up on next start; no admin needed.
+
+  Build:    wix build AirenoOS.AutoCAD.Installer.wxs -arch x64 -ext WixToolset.UI.wixext -o build\AirenoOS.AutoCAD.Plugin.msi
+  Install:  msiexec /i build\AirenoOS.AutoCAD.Plugin.msi /qb
+  Silent:   msiexec /i build\AirenoOS.AutoCAD.Plugin.msi /quiet
+  Uninstall: msiexec /x build\AirenoOS.AutoCAD.Plugin.msi /quiet
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="AirenoOS AutoCAD Plugin"
+      Manufacturer="AirenoOS"
+      Version="1.0.0"
+      UpgradeCode="F9E8D7C6-B5A4-4321-9876-543210FEDCBA"
+      Scope="perUser"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         AutoCAD version detection
+         FileSearch probes for acad.exe under the standard install path.
+         If found, ACAD20XX_FOUND is set to the full path (truthy in conditions).
+         ─────────────────────────────────────────────────────────────────────── -->
+    <Property Id="ACAD2024_FOUND" Secure="yes">
+      <DirectorySearch Id="Acad2024PathSearch" Path="[ProgramFiles64Folder]Autodesk\AutoCAD 2024" Depth="0">
+        <FileSearch Id="Acad2024ExeSearch" Name="acad.exe" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="ACAD2025_FOUND" Secure="yes">
+      <DirectorySearch Id="Acad2025PathSearch" Path="[ProgramFiles64Folder]Autodesk\AutoCAD 2025" Depth="0">
+        <FileSearch Id="Acad2025ExeSearch" Name="acad.exe" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="ACAD2026_FOUND" Secure="yes">
+      <DirectorySearch Id="Acad2026PathSearch" Path="[ProgramFiles64Folder]Autodesk\AutoCAD 2026" Depth="0">
+        <FileSearch Id="Acad2026ExeSearch" Name="acad.exe" />
+      </DirectorySearch>
+    </Property>
+
+    <!-- Checkbox-bound install flags. Empty = unchecked, "1" = checked.
+         Default to unchecked; SetProperty below switches to checked for detected versions. -->
+    <Property Id="INSTALL_2024" Secure="yes" />
+    <Property Id="INSTALL_2025" Secure="yes" />
+    <Property Id="INSTALL_2026" Secure="yes" />
+
+    <!-- Detection-driven defaults: pre-check the checkbox if AutoCAD version is installed. -->
+    <SetProperty Id="INSTALL_2024" Value="1" After="AppSearch" Condition="ACAD2024_FOUND" Sequence="ui" />
+    <SetProperty Id="INSTALL_2025" Value="1" After="AppSearch" Condition="ACAD2025_FOUND" Sequence="ui" />
+    <SetProperty Id="INSTALL_2026" Value="1" After="AppSearch" Condition="ACAD2026_FOUND" Sequence="ui" />
+
+    <!-- Status labels — dynamic text driven by detection. -->
+    <Property Id="STATUS_2024" Value="(not installed)" />
+    <Property Id="STATUS_2025" Value="(not installed)" />
+    <Property Id="STATUS_2026" Value="(not installed)" />
+    <SetProperty Id="STATUS_2024" Value="(detected)" After="AppSearch" Condition="ACAD2024_FOUND" Sequence="ui" />
+    <SetProperty Id="STATUS_2025" Value="(detected)" After="AppSearch" Condition="ACAD2025_FOUND" Sequence="ui" />
+    <SetProperty Id="STATUS_2026" Value="(detected)" After="AppSearch" Condition="ACAD2026_FOUND" Sequence="ui" />
+
+    <!-- Refuse to install if zero AutoCAD versions detected. -->
+    <Launch Condition="ACAD2024_FOUND OR ACAD2025_FOUND OR ACAD2026_FOUND"
+            Message="No supported AutoCAD installation was detected (2024, 2025, or 2026). Install AutoCAD first, then re-run this installer." />
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         Bundle folder structure (per-user)
+         ─────────────────────────────────────────────────────────────────────── -->
+    <StandardDirectory Id="AppDataFolder">
+      <Directory Id="AutodeskDir" Name="Autodesk">
+        <Directory Id="AppPluginsDir" Name="ApplicationPlugins">
+          <Directory Id="BUNDLEROOT" Name="AirenoOS.bundle">
+            <Directory Id="ContentsDir" Name="Contents">
+              <Directory Id="Acad2024Dir" Name="2024" />
+              <Directory Id="Acad2025Dir" Name="2025" />
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         Components
+         ─────────────────────────────────────────────────────────────────────── -->
+    <ComponentGroup Id="CoreFiles">
+      <!-- PackageContents.xml + folder cleanup; always installed (Core feature). -->
+      <Component Id="PackageContents" Directory="BUNDLEROOT" Guid="A1A1A1A1-1111-1111-1111-111111111111">
+        <File Id="PackageContentsXml"
+              Source="staging\AirenoOS.bundle\PackageContents.xml"
+              KeyPath="yes" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\AirenoOS\AutoCADPlugin"
+                       Name="Installed" Type="string" Value="1.0.0" KeyPath="no" />
+        <RemoveFolder Id="RemoveBundleRoot"  On="uninstall" />
+        <RemoveFolder Id="RemoveContentsDir" Directory="ContentsDir" On="uninstall" />
+        <RemoveFolder Id="RemoveAppPlugins"  Directory="AppPluginsDir" On="uninstall" />
+        <RemoveFolder Id="RemoveAutodesk"    Directory="AutodeskDir"   On="uninstall" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Files_2024">
+      <Component Id="Acad2024_Main" Directory="Acad2024Dir" Guid="B2B2B2B2-2222-2222-2222-222222222222">
+        <File Source="staging\AirenoOS.bundle\Contents\2024\AirenoOS.AutoCAD.Plugin.dll" KeyPath="yes" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\Microsoft.Bcl.AsyncInterfaces.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.Buffers.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.Memory.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.Numerics.Vectors.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.Runtime.CompilerServices.Unsafe.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.Text.Encodings.Web.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.Text.Json.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.Threading.Tasks.Extensions.dll" />
+        <File Source="staging\AirenoOS.bundle\Contents\2024\System.ValueTuple.dll" />
+        <RemoveFolder Id="RemoveAcad2024" On="uninstall" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Files_2025_2026">
+      <!-- Single component shared between Feat2025 and Feat2026 — same DLL covers both ARXs. -->
+      <Component Id="Acad2025_Main" Directory="Acad2025Dir" Guid="C3C3C3C3-3333-3333-3333-333333333333">
+        <File Source="staging\AirenoOS.bundle\Contents\2025\AirenoOS.AutoCAD.Plugin.dll" KeyPath="yes" />
+        <RemoveFolder Id="RemoveAcad2025" On="uninstall" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         Features — Level conditions control which get installed.
+         A feature is installed when its Level <= INSTALLLEVEL (default 3).
+         Override Level=0 (≡ "not installed, hidden") when the matching checkbox is off.
+         ─────────────────────────────────────────────────────────────────────── -->
+    <Feature Id="Core" Title="Plugin Core (required)" Level="1" Display="hidden"
+             AllowAbsent="no">
+      <ComponentGroupRef Id="CoreFiles" />
+    </Feature>
+
+    <Feature Id="Feat2024" Title="AutoCAD 2024" Level="1"
+             Description=".NET Framework 4.8 build for AutoCAD 2024 (R24.3).">
+      <Level Value="0" Condition="NOT INSTALL_2024" />
+      <ComponentGroupRef Id="Files_2024" />
+    </Feature>
+
+    <Feature Id="Feat2025" Title="AutoCAD 2025" Level="1"
+             Description=".NET 8 build for AutoCAD 2025 (R25.0).">
+      <Level Value="0" Condition="NOT (INSTALL_2025 OR INSTALL_2026)" />
+      <ComponentGroupRef Id="Files_2025_2026" />
+    </Feature>
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         Custom UI: insert a version-selection dialog into WixUI_FeatureTree's flow.
+         Wizard order: Welcome → License → SelectVersions → Verify → Progress → Finish
+         ─────────────────────────────────────────────────────────────────────── -->
+    <ui:WixUI Id="WixUI_FeatureTree" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <UI>
+      <Dialog Id="VersionSelectDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <!-- Banner -->
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+                 TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}Select AutoCAD Versions" />
+        <Control Id="Subtitle" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="Choose which AutoCAD versions to install the plugin for." />
+
+        <!-- Bottom divider + buttons -->
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="LicenseAgreementDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+
+        <!-- ── AutoCAD 2024 ───────────────────────────────────────── -->
+        <Control Id="Cb2024" Type="CheckBox" X="30" Y="70" Width="200" Height="17"
+                 Property="INSTALL_2024" CheckBoxValue="1" Text="AutoCAD &amp;2024" />
+        <Control Id="St2024" Type="Text" X="240" Y="71" Width="120" Height="15" Transparent="yes"
+                 Text="[STATUS_2024]" />
+
+        <!-- ── AutoCAD 2025 ───────────────────────────────────────── -->
+        <Control Id="Cb2025" Type="CheckBox" X="30" Y="110" Width="200" Height="17"
+                 Property="INSTALL_2025" CheckBoxValue="1" Text="AutoCAD 202&amp;5" />
+        <Control Id="St2025" Type="Text" X="240" Y="111" Width="120" Height="15" Transparent="yes"
+                 Text="[STATUS_2025]" />
+
+        <!-- ── AutoCAD 2026 ───────────────────────────────────────── -->
+        <Control Id="Cb2026" Type="CheckBox" X="30" Y="150" Width="200" Height="17"
+                 Property="INSTALL_2026" CheckBoxValue="1" Text="AutoCAD 202&amp;6" />
+        <Control Id="St2026" Type="Text" X="240" Y="151" Width="120" Height="15" Transparent="yes"
+                 Text="[STATUS_2026]" />
+
+        <!-- Hint line -->
+        <Control Id="Hint" Type="Text" X="30" Y="190" Width="320" Height="34" Transparent="yes" NoPrefix="yes"
+                 Text="Versions marked (detected) are pre-selected. Versions marked (not installed) can still be ticked if you have AutoCAD in a non-standard location, or to deploy files ahead of an upcoming AutoCAD install." />
+      </Dialog>
+
+      <!-- Wire VersionSelectDlg into the flow: License → SelectVersions → Verify -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="VersionSelectDlg"
+               Order="3" Condition="LicenseAccepted = &quot;1&quot;" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="VersionSelectDlg" Order="3" />
+    </UI>
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         Control conditions for checkbox enable/disable based on AutoCAD detection.
+         When a version is missing, its checkbox is greyed but still visible —
+         exactly the UX requested.
+         ─────────────────────────────────────────────────────────────────────── -->
+    <UI>
+      <ProgressText Action="InstallFiles" Message="Installing plugin files..." />
+    </UI>
+  </Package>
+</Wix>

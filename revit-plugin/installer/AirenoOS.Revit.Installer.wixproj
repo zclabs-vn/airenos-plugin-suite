@@ -1,0 +1,31 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!--
+    WiX 5 installer for AirenoOS Revit plugin.
+
+    Builds a per-machine MSI that installs the plugin into
+        %ProgramData%\Autodesk\Revit\Addins\<2024|2025|2026>\
+    so that ALL Windows users of the machine see the AirenoOS ribbon tab.
+
+    Each Revit version is an MSI Feature, so end-users can opt out of versions
+    they don't have installed. The Feature is selected by default — if the
+    target Revit version isn't installed, the addin just sits unused; Revit
+    only loads .addin files for the version that opened.
+
+    Build:
+        dotnet build AirenoOS.Revit.Installer.wixproj -p:Configuration=Release
+    Output:
+        bin\<config>\AirenoOS.Revit.Installer.msi
+  -->
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- Match the plugin build's per-version output layout. -->
+    <PluginBuildRoot>..\build</PluginBuildRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>

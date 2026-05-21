@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX 5 source for the BricsCAD plugin MSI.
+
+  Build with:
+    wix build AirenoOS.BricsCAD.Installer.wxs `
+      -d PluginDll=..\AirenoOS.BricsCAD.Plugin\bin\Release\net8.0-windows\AirenoOS.BricsCAD.Plugin.dll `
+      -o ..\dist\AirenoOS.BricsCAD.Plugin-1.0.0.msi
+
+  Install layout:
+    %ProgramFiles%\Bricsys\ApplicationPlugins\AirenoOS.BricsCAD.bundle\
+      PackageContents.xml
+      Contents\
+        Windows\
+          AirenoOS.BricsCAD.Plugin.dll
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+      Name="AirenoOS BricsCAD Plugin"
+      Manufacturer="ZCLabs"
+      Version="1.0.0.0"
+      UpgradeCode="C3D1A5A2-AFE6-4F1A-9B0E-A1A2A3A4A5A6"
+      Scope="perMachine"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <SummaryInformation
+        Description="AirenoOS metadata sync plugin for BricsCAD V26"
+        Keywords="AirenoOS;BricsCAD;Plugin;MCP" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Friendly product info shown in Add/Remove Programs -->
+    <Property Id="ARPHELPLINK" Value="https://zclabs.vn" />
+    <Property Id="ARPURLINFOABOUT" Value="https://zclabs.vn" />
+
+    <Feature Id="Main" Title="AirenoOS BricsCAD Plugin" Level="1" Display="expand">
+      <ComponentGroupRef Id="BundleFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <!--
+      Plugin must live under Bricsys\ApplicationPlugins so BricsCAD auto-loads it.
+      Using StandardDirectory makes WiX target the correct ProgramFiles64Folder
+      regardless of host bitness.
+    -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="BricsysFolder" Name="Bricsys">
+        <Directory Id="AppPluginsFolder" Name="ApplicationPlugins">
+          <Directory Id="BundleFolder" Name="AirenoOS.BricsCAD.bundle">
+            <Directory Id="ContentsFolder" Name="Contents">
+              <Directory Id="BundleWinSubFolder" Name="Windows" />
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="BundleFiles">
+      <!-- PackageContents.xml at the bundle root — read by BricsCAD on startup -->
+      <Component Id="C_PackageContents" Directory="BundleFolder">
+        <File
+            Id="F_PackageContents"
+            Name="PackageContents.xml"
+            Source="PackageContents.xml"
+            KeyPath="yes" />
+      </Component>
+
+      <!-- The actual plugin DLL -->
+      <Component Id="C_PluginDll" Directory="BundleWinSubFolder">
+        <File
+            Id="F_PluginDll"
+            Name="AirenoOS.BricsCAD.Plugin.dll"
+            Source="$(var.PluginDll)"
+            KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
