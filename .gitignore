@@ -1,16 +1,40 @@
 # Internal docs — not for public repo
 docs/
 
-# Build outputs
+# Local scripts
+setup-git.ps1
+
+# Claude Code local state (per-machine; never commit)
+.claude/
+
+# .NET build outputs (intermediate)
 bin/
 obj/
+
+# WiX intermediates (keep the .msi as deliverable, drop everything else)
+*.wixobj
+*.wixpdb
+**/Installer/build/install*.log
+**/Installer/staging/
+
+# Visual Studio
+.vs/
 *.user
 *.suo
-.vs/
+
+# Test fixtures — drawing lock files (created while AutoCAD has the file open)
+*.dwl
+*.dwl2
+*.bak
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Environment
+.env
+.deploy.env
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Local scripts
-setup-git.ps1
