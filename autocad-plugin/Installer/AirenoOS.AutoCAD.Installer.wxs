@@ -78,6 +78,7 @@
             <Directory Id="ContentsDir" Name="Contents">
               <Directory Id="Acad2024Dir" Name="2024" />
               <Directory Id="Acad2025Dir" Name="2025" />
+              <Directory Id="Acad2026Dir" Name="2026" />
             </Directory>
           </Directory>
         </Directory>
@@ -119,11 +120,19 @@
       </Component>
     </ComponentGroup>
 
-    <ComponentGroup Id="Files_2025_2026">
-      <!-- Single component shared between Feat2025 and Feat2026 — same DLL covers both ARXs. -->
+    <ComponentGroup Id="Files_2025">
       <Component Id="Acad2025_Main" Directory="Acad2025Dir" Guid="C3C3C3C3-3333-3333-3333-333333333333">
         <File Source="staging\AirenoOS.bundle\Contents\2025\AirenoOS.AutoCAD.Plugin.dll" KeyPath="yes" />
         <RemoveFolder Id="RemoveAcad2025" On="uninstall" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Files_2026">
+      <!-- Same net8 DLL as 2025, kept in its own folder so PackageContents.xml can declare
+           an explicit R25.1 ComponentEntry. Lets users install 2025 OR 2026 independently. -->
+      <Component Id="Acad2026_Main" Directory="Acad2026Dir" Guid="D4D4D4D4-4444-4444-4444-444444444444">
+        <File Source="staging\AirenoOS.bundle\Contents\2026\AirenoOS.AutoCAD.Plugin.dll" KeyPath="yes" />
+        <RemoveFolder Id="RemoveAcad2026" On="uninstall" />
       </Component>
     </ComponentGroup>
 
@@ -145,8 +154,14 @@
 
     <Feature Id="Feat2025" Title="AutoCAD 2025" Level="1"
              Description=".NET 8 build for AutoCAD 2025 (R25.0).">
-      <Level Value="0" Condition="NOT (INSTALL_2025 OR INSTALL_2026)" />
-      <ComponentGroupRef Id="Files_2025_2026" />
+      <Level Value="0" Condition="NOT INSTALL_2025" />
+      <ComponentGroupRef Id="Files_2025" />
+    </Feature>
+
+    <Feature Id="Feat2026" Title="AutoCAD 2026" Level="1"
+             Description=".NET 8 build for AutoCAD 2026 (R25.1).">
+      <Level Value="0" Condition="NOT INSTALL_2026" />
+      <ComponentGroupRef Id="Files_2026" />
     </Feature>
 
     <!-- ───────────────────────────────────────────────────────────────────────

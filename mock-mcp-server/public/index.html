@@ -169,12 +169,72 @@
       color: var(--muted);
     }
 
+    /* JSON tree viewer */
+    .json-tree {
+      font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .json-content { padding-left: 18px; }
+    .json-toggle {
+      cursor: pointer;
+      user-select: none;
+      color: var(--muted);
+      display: inline-block;
+      width: 12px;
+      text-align: center;
+      margin-right: 2px;
+      font-size: 10px;
+      transition: color 0.1s, transform 0.15s;
+    }
+    .json-toggle:hover { color: var(--accent); }
+    .json-collapsed-info {
+      color: var(--muted);
+      font-style: italic;
+      padding: 0 4px;
+    }
+
     /* JSON syntax coloring */
     .j-key   { color: var(--accent-2); }
     .j-str   { color: #c3e88d; }
     .j-num   { color: #f78c6c; }
     .j-bool  { color: #ff5874; }
     .j-null  { color: var(--muted); }
+    .j-punct { color: var(--text); }
+
+    .detail-tools {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .detail-tools button {
+      background: var(--panel-2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 3px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+    }
+    .detail-tools button:hover { background: var(--border); color: var(--text); }
+
+    .confirm-btn {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 1px 8px;
+      border-radius: 10px;
+      background: rgba(127,219,255,0.12);
+      color: var(--accent);
+      border: 1px solid rgba(127,219,255,0.35);
+      cursor: pointer;
+      font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+    .confirm-btn:hover { background: rgba(127,219,255,0.25); }
   </style>
 </head>
 <body>
@@ -197,9 +257,15 @@
       <div class="detail-header" id="detail-header" style="display:none">
         <h2 id="detail-title"></h2>
         <div class="meta" id="detail-meta"></div>
+        <div class="detail-tools">
+          <button id="expand-all">Expand all</button>
+          <button id="collapse-all">Collapse all</button>
+          <button id="collapse-objects">Collapse all groups</button>
+          <button id="copy-json">Copy JSON</button>
+        </div>
       </div>
       <div class="detail-content">
-        <pre id="detail" class="empty">Select a payload from the list to inspect.</pre>
+        <div id="detail" class="empty">Select a payload from the list to inspect.</div>
       </div>
     </section>
   </main>
@@ -214,6 +280,10 @@
       status: document.getElementById('status'),
       refresh: document.getElementById('refresh'),
       clear: document.getElementById('clear'),
+      expandAll: document.getElementById('expand-all'),
+      collapseAll: document.getElementById('collapse-all'),
+      collapseObjects: document.getElementById('collapse-objects'),
+      copyJson: document.getElementById('copy-json'),
     };
 
     let selectedId = null;
@@ -238,17 +308,40 @@
       color: '#d6deeb',
     });
 
+    // Connection state machine — fires toasts only on transitions so a single
+    // transient blip doesn't spam the user. Polling interval also backs off
+    // (3s healthy → 8s when down) to avoid hammering a failing endpoint.
+    let connectionState = 'unknown';  // 'unknown' | 'ok' | 'down'
+    let pollTimer = null;
+    const POLL_OK_MS   = 3000;
+    const POLL_DOWN_MS = 8000;
+
     async function loadList() {
       try {
         const res = await fetch('/api/payloads');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const items = await res.json();
+
+        if (connectionState === 'down') {
+          Toast.fire({ icon: 'success', title: 'Reconnected' });
+        }
+        connectionState = 'ok';
+
         lastItems = items;
         updateCounts(items);
         els.status.textContent = `${items.length} payload${items.length === 1 ? '' : 's'}`;
         renderList(applyFilter(items));
       } catch (err) {
+        if (connectionState === 'ok' || connectionState === 'unknown') {
+          // Only toast on the first failure (transition into 'down').
+          Toast.fire({ icon: 'error', title: 'Connection lost' });
+        }
+        connectionState = 'down';
         els.status.textContent = 'connection error';
-        Toast.fire({ icon: 'error', title: 'Connection lost' });
+      } finally {
+        // Reschedule with interval matching current state.
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(loadList, connectionState === 'down' ? POLL_DOWN_MS : POLL_OK_MS);
       }
     }
 
@@ -295,7 +388,7 @@
             <div class="list-item ${it.id === selectedId ? 'active' : ''}" data-id="${it.id}">
               <div>
                 <span class="source ${src}">${src}</span>
-                <span>${escapeHtml(it.summary?.source_software_version || '')}</span>
+                <span>${escapeHtmlText(it.summary?.source_software_version || '')}</span>
               </div>
               <div class="time">${time} · ${trigger}</div>
               <div class="stats">${stats || '—'}</div>
@@ -308,6 +401,9 @@
       });
     }
 
+    // Currently-loaded payload (used by Confirm dialog to read document_project_token).
+    let currentPayload = null;
+
     async function loadDetail(id) {
       selectedId = id;
       Array.from(els.list.children).forEach((n) =>
@@ -317,6 +413,7 @@
         const res = await fetch(`/api/payloads/${id}`);
         if (!res.ok) throw new Error('not found');
         const env = await res.json();
+        currentPayload = env.payload;
         els.detailHeader.style.display = 'block';
         els.detailTitle.textContent = env.id;
         els.detailMeta.textContent =
@@ -324,31 +421,191 @@
           `from ${env.source_ip || 'unknown'}  ·  ` +
           `token ${env.bearer_token_preview}`;
         els.detail.classList.remove('empty');
-        els.detail.innerHTML = syntaxHighlight(env.payload);
+        els.detail.classList.add('json-tree');
+        els.detail.replaceChildren(renderValue(env.payload, /*isLast*/ true));
       } catch (err) {
         Toast.fire({ icon: 'error', title: 'Failed to load payload' });
       }
     }
 
-    function syntaxHighlight(obj) {
-      const json = JSON.stringify(obj, null, 2);
-      return escapeHtml(json).replace(
-        /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
-        (match) => {
-          let cls = 'j-num';
-          if (/^"/.test(match)) cls = /:$/.test(match) ? 'j-key' : 'j-str';
-          else if (/true|false/.test(match)) cls = 'j-bool';
-          else if (/null/.test(match)) cls = 'j-null';
-          return `<span class="${cls}">${match}</span>`;
-        }
-      );
+    // ── Confirm dialog ───────────────────────────────────────────────────────────
+    // Mocks Brian's MCP cockpit "confirm" action: POSTs to /v1/admin/confirm so the
+    // plugin's next AIRENO_WRITEBACK call picks up the assigned backpack_id.
+
+    async function openConfirmDialog(objectSignal) {
+      const g1 = objectSignal.group_1_identity || {};
+      const g2 = objectSignal.group_2_naming || {};
+      const docToken = currentPayload?.document_project_token;
+      if (!docToken || !g1.native_id) {
+        Toast.fire({ icon: 'error', title: 'Missing document_project_token or native_id' });
+        return;
+      }
+
+      const defaultBackpack = g1.aireno_backpack_id || ('bp-' + Math.random().toString(16).slice(2, 10));
+      const defaultLabel = g2.visible_label || g2.definition_name || '';
+
+      const { isConfirmed, value } = await SwalDark.fire({
+        title: 'Confirm object → assign backpack_id',
+        html:
+          `<div style="text-align:left;font-size:12px;color:#7a8597;margin-bottom:10px">
+            <code style="color:#82aaff">native_id</code>: <code>${escapeHtmlText(g1.native_id)}</code>
+          </div>` +
+          `<input id="swal-backpack" class="swal2-input" placeholder="aireno_backpack_id" value="${escapeHtmlText(defaultBackpack)}" />` +
+          `<input id="swal-label" class="swal2-input" placeholder="confirmed_label" value="${escapeHtmlText(defaultLabel)}" />` +
+          `<input id="swal-room" class="swal2-input" placeholder="confirmed_room_id (optional)" value="" />`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Confirm',
+        preConfirm: () => ({
+          aireno_backpack_id: document.getElementById('swal-backpack').value.trim(),
+          confirmed_label:    document.getElementById('swal-label').value.trim(),
+          confirmed_room_id:  document.getElementById('swal-room').value.trim() || null,
+        }),
+      });
+
+      if (!isConfirmed) return;
+
+      try {
+        const res = await fetch('/v1/admin/confirm', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // Bearer required by endpoint; any non-empty token works in dev mode.
+            'Authorization': 'Bearer inspector-ui',
+          },
+          body: JSON.stringify({
+            document_project_token: docToken,
+            native_id: g1.native_id,
+            aireno_backpack_id: value.aireno_backpack_id,
+            confirmed_label: value.confirmed_label,
+            confirmed_room_id: value.confirmed_room_id,
+          }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        Toast.fire({ icon: 'success', title: 'Confirmation stored — plugin can now write back' });
+      } catch (err) {
+        Toast.fire({ icon: 'error', title: 'Confirm failed: ' + err.message });
+      }
     }
 
-    function escapeHtml(s) {
-      return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+    // ── JSON tree renderer with collapsible {} / [] nodes ────────────────────────
+    // Each composite node renders as:
+    //   ▼ { <content indented> } ,?       (expanded — default)
+    //   ▶ { … 8 keys } ,?                  (collapsed)
+
+    function el(tag, cls) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      return e;
+    }
+    function txt(s, cls) {
+      const e = document.createElement('span');
+      if (cls) e.className = cls;
+      e.textContent = s;
+      return e;
+    }
+
+    function renderValue(value, isLast, key) {
+      if (value === null)               return primitiveLine('null', 'j-null', isLast, key);
+      if (typeof value === 'boolean')   return primitiveLine(String(value), 'j-bool', isLast, key);
+      if (typeof value === 'number')    return primitiveLine(String(value), 'j-num', isLast, key);
+      if (typeof value === 'string')    return primitiveLine(JSON.stringify(value), 'j-str', isLast, key);
+      if (Array.isArray(value))         return composite(value, '[', ']', isLast, key, /*isArray*/ true);
+      if (typeof value === 'object')    return composite(value, '{', '}', isLast, key, /*isArray*/ false);
+      return primitiveLine(String(value), 'j-str', isLast, key);
+    }
+
+    function primitiveLine(text, cls, isLast, key) {
+      const line = el('div', 'json-line');
+      if (key !== undefined) {
+        line.appendChild(txt('"' + key + '"', 'j-key'));
+        line.appendChild(txt(': ', 'j-punct'));
+      }
+      line.appendChild(txt(text, cls));
+      if (!isLast) line.appendChild(txt(',', 'j-punct'));
+      return line;
+    }
+
+    function composite(value, openChar, closeChar, isLast, key, isArray) {
+      const keys = isArray ? value.map((_, i) => i) : Object.keys(value);
+      const wrap = el('div', 'json-line');
+
+      // Key prefix (if this composite is a value in a parent object)
+      if (key !== undefined) {
+        wrap.appendChild(txt('"' + key + '"', 'j-key'));
+        wrap.appendChild(txt(': ', 'j-punct'));
+      }
+
+      // Empty case: no toggle, render inline
+      if (keys.length === 0) {
+        wrap.appendChild(txt(openChar + closeChar, 'j-punct'));
+        if (!isLast) wrap.appendChild(txt(',', 'j-punct'));
+        return wrap;
+      }
+
+      // Toggle handle
+      const toggle = el('span', 'json-toggle');
+      toggle.textContent = '▼';
+      toggle.dataset.expanded = '1';
+      wrap.appendChild(toggle);
+      wrap.appendChild(txt(openChar, 'j-punct'));
+
+      // If this composite looks like a plugin ObjectSignal (has group_1_identity
+      // with non-null native_id), inject a "Confirm" button so the inspector
+      // user can mock Brian's MCP cockpit confirmation step.
+      if (!isArray && value && value.group_1_identity && value.group_1_identity.native_id) {
+        const btn = el('span', 'confirm-btn');
+        btn.textContent = 'Confirm';
+        btn.title = 'Mark this object confirmed in mock MCP (assigns aireno_backpack_id)';
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openConfirmDialog(value);
+        });
+        wrap.appendChild(btn);
+      }
+
+      // Collapsed info span — visible only when collapsed
+      const summary = txt(
+        ` ${keys.length} ${isArray ? 'item' + (keys.length === 1 ? '' : 's') : 'key' + (keys.length === 1 ? '' : 's')} `,
+        'json-collapsed-info'
+      );
+      summary.style.display = 'none';
+      wrap.appendChild(summary);
+
+      // Expanded content
+      const content = el('div', 'json-content');
+      keys.forEach((k, i) => {
+        const childIsLast = i === keys.length - 1;
+        const child = renderValue(value[k], childIsLast, isArray ? undefined : k);
+        content.appendChild(child);
+      });
+      wrap.appendChild(content);
+      wrap.appendChild(txt(closeChar, 'j-punct'));
+      if (!isLast) wrap.appendChild(txt(',', 'j-punct'));
+
+      // Toggle behavior
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const expanded = toggle.dataset.expanded === '1';
+        toggle.dataset.expanded = expanded ? '0' : '1';
+        toggle.textContent = expanded ? '▶' : '▼';
+        content.style.display = expanded ? 'none' : 'block';
+        summary.style.display = expanded ? 'inline' : 'none';
+      });
+
+      return wrap;
+    }
+
+    function setAllToggles(expand) {
+      els.detail.querySelectorAll('.json-toggle').forEach((t) => {
+        const isExpanded = t.dataset.expanded === '1';
+        if (isExpanded !== expand) t.click();
+      });
+    }
+
+    // Used by renderList's innerHTML template (not by the DOM tree renderer).
+    function escapeHtmlText(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     document.getElementById('filters').addEventListener('click', (e) => {
@@ -359,6 +616,46 @@
         c.classList.toggle('active', c === chip)
       );
       renderList(applyFilter(lastItems));
+    });
+
+    els.expandAll.addEventListener('click', () => setAllToggles(true));
+    els.collapseAll.addEventListener('click', () => setAllToggles(false));
+    els.copyJson.addEventListener('click', async () => {
+      if (!currentPayload) {
+        Toast.fire({ icon: 'warning', title: 'No payload loaded' });
+        return;
+      }
+      const text = JSON.stringify(currentPayload, null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+        Toast.fire({ icon: 'success', title: `Copied ${text.length.toLocaleString()} chars` });
+      } catch (err) {
+        // Clipboard API requires HTTPS or localhost; fall back to a hidden textarea hack.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        Toast.fire(
+          ok
+            ? { icon: 'success', title: `Copied ${text.length.toLocaleString()} chars` }
+            : { icon: 'error', title: 'Copy failed: ' + err.message }
+        );
+      }
+    });
+    // "Collapse all groups" = collapse only nodes whose key is group_1_identity .. group_8_quality.
+    // Useful for navigating arrays of plugin ObjectSignal where each item has 8 verbose groups.
+    els.collapseObjects.addEventListener('click', () => {
+      els.detail.querySelectorAll('.json-line').forEach((line) => {
+        const keySpan = line.querySelector(':scope > .j-key');
+        if (!keySpan) return;
+        if (!/^"group_[1-8]_/.test(keySpan.textContent)) return;
+        const toggle = line.querySelector(':scope > .json-toggle');
+        if (toggle && toggle.dataset.expanded === '1') toggle.click();
+      });
     });
 
     els.refresh.addEventListener('click', loadList);
@@ -390,8 +687,8 @@
       }
     });
 
+    // loadList self-reschedules via setTimeout — see connection state machine above.
     loadList();
-    setInterval(loadList, 3000); // poll for new payloads
   </script>
 </body>
 </html>

@@ -51,6 +51,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 EnrichXrefContext(tr, bt, payload);
                 EnrichDynamicBlocks(tr, ms, payload);
                 AttachNearbyText(payload, texts);
+                EnrichRoomLabels(tr, ms, payload, texts);
 
                 tr.Commit();
             }
@@ -94,11 +95,11 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
             foreach (var obj in payload.Objects)
             {
-                if (obj.SpatialPosition == null) continue;
-                var origin = new Point3d(obj.SpatialPosition.X, obj.SpatialPosition.Y, obj.SpatialPosition.Z);
+                if (obj.Group3Spatial.SpatialPosition == null) continue;
+                var origin = new Point3d(obj.Group3Spatial.SpatialPosition.X, obj.Group3Spatial.SpatialPosition.Y, obj.Group3Spatial.SpatialPosition.Z);
 
                 var radius = 2000.0;
-                if (obj.BoundingBox is { } bb)
+                if (obj.Group4Geometry.BoundingBox is { } bb)
                 {
                     var diag = Math.Sqrt(bb.Width * bb.Width + bb.Height * bb.Height);
                     radius = Math.Min(2000.0, Math.Max(500.0, diag * 0.75));
@@ -117,8 +118,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 }
                 if (ids.Count > 0)
                 {
-                    obj.NearbyTextLabels = labels;
-                    // Annotation.NearbyIds is the inverse, populated below in a second pass for symmetry
+                    obj.Group2Naming.NearbyTextLabels = labels;
                 }
             }
 
@@ -127,8 +127,8 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             {
                 if (ann.Position == null) continue;
                 ann.NearbyIds = payload.Objects
-                    .Where(o => o.NearbyTextLabels != null && o.NearbyTextLabels.Contains(ann.Content ?? ""))
-                    .Select(o => o.NativeId ?? "")
+                    .Where(o => o.Group2Naming.NearbyTextLabels != null && o.Group2Naming.NearbyTextLabels.Contains(ann.Content ?? ""))
+                    .Select(o => o.Group1Identity.NativeId ?? "")
                     .Where(s => !string.IsNullOrEmpty(s))
                     .ToList();
             }
@@ -160,6 +160,24 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
         private static void TryAddHatch(ExtractionPayload payload, Hatch h)
         {
+            // Associative hatches track their source-boundary entities; pull their handles
+            // so Brian's MCP can correlate hatch → polyline/circle/etc that defines the area.
+            List<string>? boundaryIds = null;
+            try
+            {
+                if (h.Associative)
+                {
+                    var ids = h.GetAssociatedObjectIds();
+                    if (ids != null && ids.Count > 0)
+                    {
+                        boundaryIds = new List<string>(ids.Count);
+                        foreach (ObjectId bid in ids)
+                            boundaryIds.Add(bid.Handle.Value.ToString("X"));
+                    }
+                }
+            }
+            catch { /* fall through with null boundaryIds */ }
+
             payload.Hatches.Add(new HatchSignal
             {
                 NativeId    = h.Handle.Value.ToString("X"),
@@ -167,7 +185,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 PatternType = h.PatternType.ToString(),
                 Layer       = h.Layer,
                 Scale       = h.PatternScale,
-                BoundaryIds = null
+                BoundaryIds = boundaryIds
             });
         }
 
@@ -180,18 +198,40 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 var btr = (BlockTableRecord)tr.GetObject(bid, OpenMode.ForRead);
                 if (!btr.IsFromExternalReference) continue;
 
-                // Mark all objects whose DefinitionId points into this xref's BTR as xref-origin
+                var pathName = btr.PathName;
+                var fileHash = HashXrefPath(pathName);
+
                 var defKey = btr.Id.Handle.Value.ToString("X");
                 foreach (var o in payload.Objects)
                 {
-                    if (o.DefinitionId == defKey)
+                    if (o.Group1Identity.DefinitionId == defKey)
                     {
-                        o.IsXrefOrigin = true;
-                        o.XrefFileName = btr.PathName;
-                        o.XrefStatus   = btr.IsResolved ? "resolved" : "unresolved";
+                        o.Group7Source.IsXrefOrigin = true;
+                        o.Group7Source.XrefFileName = pathName;
+                        o.Group7Source.XrefFileHash = fileHash;
+                        o.Group7Source.XrefStatus   = btr.IsResolved ? "resolved" : "unresolved";
                     }
                 }
             }
+        }
+
+        // SHA256-hash the xref file name (matches CoreExtractor's HashFilename: 16-hex prefix
+        // of UTF-8(lowercased basename) digest). Returns null if path is empty.
+        private static string? HashXrefPath(string? pathName)
+        {
+            if (string.IsNullOrEmpty(pathName)) return null;
+            try
+            {
+                var basename = System.IO.Path.GetFileName(pathName!).ToLowerInvariant();
+                var bytes = System.Text.Encoding.UTF8.GetBytes(basename);
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    var hash = sha.ComputeHash(bytes);
+                    var hex = BitConverter.ToString(hash).Replace("-", string.Empty);
+                    return hex.Substring(0, 16);
+                }
+            }
+            catch { return null; }
         }
 
         // ── Dynamic blocks ───────────────────────────────────────────────────────────
@@ -203,19 +243,12 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 var br = tr.GetObject(id, OpenMode.ForRead) as BlockReference;
                 if (br == null || !br.IsDynamicBlock) continue;
 
-                var handle = br.Handle.Value.ToString("X");
                 var target = payload.Objects.FirstOrDefault(o =>
-                    string.Equals(o.DefinitionId, br.BlockTableRecord.Handle.Value.ToString("X"))
-                    && o.SpatialPosition != null
-                    && Approx(o.SpatialPosition.X, br.Position.X)
-                    && Approx(o.SpatialPosition.Y, br.Position.Y));
+                    string.Equals(o.Group1Identity.DefinitionId, br.BlockTableRecord.Handle.Value.ToString("X"))
+                    && o.Group3Spatial.SpatialPosition != null
+                    && Approx(o.Group3Spatial.SpatialPosition.X, br.Position.X)
+                    && Approx(o.Group3Spatial.SpatialPosition.Y, br.Position.Y));
                 if (target == null) continue;
-
-                var dyn = new DynamicBlockState
-                {
-                    BlockName  = ((BlockTableRecord)tr.GetObject(br.DynamicBlockTableRecord, OpenMode.ForRead)).Name,
-                    Properties = new Dictionary<string, string?>()
-                };
 
                 // Identify the Visibility state parameter robustly. Prior implementation matched
                 // only on PropertyName == "Visibility", which fails when the user names the parameter
@@ -228,16 +261,89 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                     allProps.FirstOrDefault(p => string.Equals(p.PropertyName, "Visibility", StringComparison.OrdinalIgnoreCase))
                     ?? allProps.FirstOrDefault(LooksLikeVisibilityState);
 
+                // Pack into Group6 existing_metadata under the "dynamic_block" group key,
+                // per Canonical Schema v0.2 existing_metadata passthrough design.
+                var dynBag = new Dictionary<string, string?>
+                {
+                    ["block_name"] = ((BlockTableRecord)tr.GetObject(br.DynamicBlockTableRecord, OpenMode.ForRead)).Name
+                };
+                if (visibilityParam != null)
+                    dynBag["visibility_state"] = visibilityParam.Value?.ToString();
+
                 foreach (var p in allProps)
                 {
-                    if (ReferenceEquals(p, visibilityParam))
-                        dyn.VisibilityState = p.Value?.ToString();
-                    else
-                        dyn.Properties[p.PropertyName] = p.Value?.ToString();
+                    if (ReferenceEquals(p, visibilityParam)) continue;
+                    dynBag[p.PropertyName] = p.Value?.ToString();
                 }
 
-                target.DynamicBlockState = dyn;
+                target.Group6Metadata.ExistingMetadata ??= new Dictionary<string, Dictionary<string, string?>>();
+                target.Group6Metadata.ExistingMetadata["dynamic_block"] = dynBag;
             }
+        }
+
+        // ── Room label inference ─────────────────────────────────────────────────────
+        // See AutoCAD plugin for the design rationale. Same algorithm, BricsCAD types.
+        private static void EnrichRoomLabels(
+            Transaction tr,
+            BlockTableRecord ms,
+            ExtractionPayload payload,
+            List<(string Content, Point3d Pos, string Layer, string Handle)> texts)
+        {
+            if (payload.Rooms.Count == 0 || payload.Objects.Count == 0) return;
+
+            var rooms = new List<(string Handle, Extents3d Bbox)>();
+            foreach (ObjectId id in ms)
+            {
+                var pl = tr.GetObject(id, OpenMode.ForRead) as Polyline;
+                if (pl == null || !pl.Closed) continue;
+                try { rooms.Add((pl.Handle.Value.ToString("X"), pl.GeometricExtents)); }
+                catch { /* no extents → skip */ }
+            }
+            if (rooms.Count == 0) return;
+
+            foreach (var obj in payload.Objects)
+            {
+                var sp = obj.Group3Spatial.SpatialPosition;
+                if (sp == null) continue;
+                var p = new Point3d(sp.X, sp.Y, sp.Z);
+
+                string? hostRoomHandle = null;
+                Extents3d hostBbox = default;
+                foreach (var r in rooms)
+                {
+                    if (ContainsXY(r.Bbox, p)) { hostRoomHandle = r.Handle; hostBbox = r.Bbox; break; }
+                }
+                if (hostRoomHandle == null) continue;
+
+                obj.Group3Spatial.RoomOrZoneNativeId = hostRoomHandle;
+                obj.Group8Quality.RoomOrigin = "spatial_inference";
+
+                string? label = null;
+                foreach (var t in texts)
+                {
+                    if (ContainsXY(hostBbox, t.Pos)) { label = t.Content; break; }
+                }
+                if (string.IsNullOrEmpty(label)) continue;
+
+                obj.Group2Naming.RoomLabelSignal = label;
+                obj.Group3Spatial.RoomOrZoneName = label;
+                obj.Group8Quality.RoomOrigin     = "naming_inference";
+
+                foreach (var room in payload.Rooms)
+                {
+                    if (room.NativeId == hostRoomHandle && string.IsNullOrEmpty(room.RawName))
+                    {
+                        room.RawName = label;
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static bool ContainsXY(Extents3d bbox, Point3d p)
+        {
+            return p.X >= bbox.MinPoint.X && p.X <= bbox.MaxPoint.X
+                && p.Y >= bbox.MinPoint.Y && p.Y <= bbox.MaxPoint.Y;
         }
 
         private static bool Approx(double a, double b) => Math.Abs(a - b) < 1e-6;

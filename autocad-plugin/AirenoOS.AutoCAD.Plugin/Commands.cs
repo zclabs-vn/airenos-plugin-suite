@@ -30,6 +30,8 @@ namespace AirenoOS.AutoCAD.Plugin
         }
 
         // AIRENO_EXTRACT — manual full extraction (Layer 1 + Layer 2)
+        // Also assigns XDATA UUIDs to any blocks that don't have one yet (manualMode=true).
+        // UUID writes happen safely here because we're outside the save-callback cascade.
         [CommandMethod("AIRENO_EXTRACT")]
         public void ExtractNow()
         {
@@ -37,11 +39,11 @@ namespace AirenoOS.AutoCAD.Plugin
             if (doc == null) return;
             if (PluginApplication.IsShuttingDown) return;
 
-            doc.Editor.WriteMessage("\nAirenoOS: Running extraction...\n");
-            SaveHandler.OnSaveComplete(doc);
+            doc.Editor.WriteMessage("\nAirenoOS: Running extraction (assigning UUIDs to new blocks)...\n");
+            SaveHandler.OnSaveComplete(doc, manualMode: true);
         }
 
-        // AIRENO_WRITEBACK — write confirmed IDs back to object XDATA
+        // AIRENO_WRITEBACK — fetch confirmed objects from MCP server and write IDs back to XDATA
         [CommandMethod("AIRENO_WRITEBACK")]
         public void ApplyWriteback()
         {
@@ -49,7 +51,26 @@ namespace AirenoOS.AutoCAD.Plugin
             if (doc == null) return;
             if (PluginApplication.IsShuttingDown) return;
 
-            doc.Editor.WriteMessage("\nAirenoOS: Applying writeback...\n");
+            var ed = doc.Editor;
+            ed.WriteMessage("\nAirenoOS: Fetching pending writebacks from server...\n");
+
+            // Fetch from server synchronously (the AIRENO_WRITEBACK command is manual,
+            // user-initiated — blocking for a few ms while we await is fine).
+            var serverItems = Communicator.HttpSender
+                .FetchPendingWritebacksAsync(doc.Database)
+                .GetAwaiter().GetResult();
+
+            if (serverItems.Count == 0)
+            {
+                ed.WriteMessage("\nAirenoOS: No pending writebacks on server. Nothing to apply.\n");
+                return;
+            }
+
+            // Resolve native_id → ObjectId by scanning ModelSpace XDATA, then enqueue.
+            var queued = WritebackQueueLoader.EnqueueFromServer(doc.Database, serverItems);
+            ed.WriteMessage($"\nAirenoOS: Queued {queued} item(s) for writeback.\n");
+
+            // Apply (existing handler walks the queue, writes XDATA via XdataHelper).
             WritebackHandler.Apply(doc);
         }
     }

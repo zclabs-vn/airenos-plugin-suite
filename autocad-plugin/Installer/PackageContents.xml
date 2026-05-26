@@ -38,13 +38,29 @@
     </ComponentEntry>
   </Components>
 
-  <!-- AutoCAD 2025 / 2026 (R25.0+) — .NET 8 build -->
-  <Components Description="AirenoOS for AutoCAD 2025+">
-    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" />
+  <!-- AutoCAD 2025 (R25.0) — .NET 8 build -->
+  <Components Description="AirenoOS for AutoCAD 2025">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R25.0" />
     <ComponentEntry
         AppName="AirenoOS.AutoCAD.Plugin"
         Version="1.0.0"
         ModuleName="./Contents/2025/AirenoOS.AutoCAD.Plugin.dll"
+        LoadOnAutoCADStartup="True">
+      <Commands GroupName="AIRENO">
+        <Command Local="AIRENO_CONNECT"   Global="AIRENO_CONNECT"   />
+        <Command Local="AIRENO_EXTRACT"   Global="AIRENO_EXTRACT"   />
+        <Command Local="AIRENO_WRITEBACK" Global="AIRENO_WRITEBACK" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+
+  <!-- AutoCAD 2026 (R25.1) — same .NET 8 build, separate folder for explicit per-version control -->
+  <Components Description="AirenoOS for AutoCAD 2026">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.1" SeriesMax="R25.1" />
+    <ComponentEntry
+        AppName="AirenoOS.AutoCAD.Plugin"
+        Version="1.0.0"
+        ModuleName="./Contents/2026/AirenoOS.AutoCAD.Plugin.dll"
         LoadOnAutoCADStartup="True">
       <Commands GroupName="AIRENO">
         <Command Local="AIRENO_CONNECT"   Global="AIRENO_CONNECT"   />

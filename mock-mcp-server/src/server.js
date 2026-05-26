@@ -98,15 +98,48 @@ app.delete('/api/payloads', async (_req, res) => {
   res.json({ status: 'cleared' });
 });
 
+// ── Writeback flow ────────────────────────────────────────────────────────────
+//
+// POST /v1/admin/confirm  — admin marks a (native_id, document_project_token) pair
+//                            as confirmed and assigns aireno_backpack_id + label.
+//                            Mocks what Brian's MCP cockpit would do.
+//
+// GET  /v1/writeback      — plugin polls this on AIRENO_WRITEBACK; receives the
+//                            list of confirmations for its document_project_token.
+//                            Plugin matches native_id against entity XDATA, then
+//                            writes confirmed_label + backpack_id + identity_state
+//                            back to XDATA. Per spec — manual command only.
+
+app.post('/v1/admin/confirm', bearerAuth, async (req, res) => {
+  try {
+    await store.addConfirmation(req.body || {});
+    res.json({ status: 'stored' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/v1/writeback', bearerAuth, (req, res) => {
+  const token = req.query.document_project_token;
+  res.json(store.getConfirmations(token));
+});
+
+app.delete('/v1/admin/confirmations', async (_req, res) => {
+  await store.clearConfirmations();
+  res.json({ status: 'cleared' });
+});
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
   console.log(`AirenoOS Mock MCP server listening on ${url}`);
-  console.log(`  POST ${url}/v1/extract       — plugin endpoint (bearer auth required)`);
-  console.log(`  GET  ${url}/                  — debug UI`);
-  console.log(`  GET  ${url}/api/payloads      — JSON list`);
-  console.log(`  GET  ${url}/health            — health check`);
+  console.log(`  POST ${url}/v1/extract            — plugin extract endpoint`);
+  console.log(`  GET  ${url}/v1/writeback          — plugin writeback fetch`);
+  console.log(`  POST ${url}/v1/admin/confirm      — admin marks object confirmed`);
+  console.log(`  GET  ${url}/                       — debug UI`);
+  console.log(`  GET  ${url}/api/payloads           — JSON list`);
+  console.log(`  GET  ${url}/health                 — health check`);
   if (ALLOWED_TOKENS.length > 0) {
     console.log(`  Token allowlist: ${ALLOWED_TOKENS.length} entries`);
   } else {

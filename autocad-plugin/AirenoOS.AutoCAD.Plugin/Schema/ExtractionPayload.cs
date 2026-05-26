@@ -1,11 +1,14 @@
-using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace AirenoOS.AutoCAD.Plugin.Schema
 {
     /// <summary>
-    /// Top-level payload — Canonical Plugin Schema v0.2
+    /// Top-level envelope — exactly matches Canonical Plugin Schema v0.2 "Full Payload Envelope".
+    /// Document-level Group 7 fields (source_software, plugin_version, extracted_at, etc.)
+    /// live inside each object's `group_7_source` per spec — NOT at top-level.
+    /// `annotations`, `dimensions`, `hatches` are Layer 2 CAD extensions confirmed by Brian
+    /// in Round 2 (out of the base envelope but within agreed scope).
     /// </summary>
     internal class ExtractionPayload
     {
@@ -15,29 +18,18 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("payload_type")]
         public string PayloadType { get; set; } = "extraction";
 
+        [JsonPropertyName("project_id")]
+        public string? ProjectId { get; set; }
+
+        [JsonPropertyName("authentication")]
+        public Authentication? Authentication { get; set; }
+
+        /// <summary>
+        /// Per spec note "same as Group 7 field" — top-level convenience duplicate
+        /// of objects[].group_7_source.document_project_token.
+        /// </summary>
         [JsonPropertyName("document_project_token")]
         public string DocumentProjectToken { get; set; } = string.Empty;
-
-        [JsonPropertyName("source_software")]
-        public string SourceSoftware { get; set; } = "autocad";
-
-        [JsonPropertyName("source_software_version")]
-        public string SourceSoftwareVersion { get; set; } = string.Empty;
-
-        [JsonPropertyName("source_software_type")]
-        public string SourceSoftwareType { get; set; } = "2d_cad";
-
-        [JsonPropertyName("plugin_version")]
-        public string PluginVersion { get; set; } = "1.0.0";
-
-        [JsonPropertyName("file_name_hash")]
-        public string FileNameHash { get; set; } = string.Empty;
-
-        [JsonPropertyName("extracted_at")]
-        public string ExtractedAt { get; set; } = DateTime.UtcNow.ToString("o");
-
-        [JsonPropertyName("extraction_trigger")]
-        public string ExtractionTrigger { get; set; } = "on_save";
 
         [JsonPropertyName("objects")]
         public List<ObjectSignal> Objects { get; set; } = new List<ObjectSignal>();
@@ -45,9 +37,10 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("rooms")]
         public List<RoomSignal> Rooms { get; set; } = new List<RoomSignal>();
 
-        [JsonPropertyName("layer_table")]
-        public List<LayerSignal> LayerTable { get; set; } = new List<LayerSignal>();
+        [JsonPropertyName("layers_or_tags")]
+        public List<LayerSignal> LayersOrTags { get; set; } = new List<LayerSignal>();
 
+        // ── Layer 2 CAD extensions (Brian Round 2 — not in base envelope but in scope) ──
         [JsonPropertyName("annotations")]
         public List<AnnotationSignal> Annotations { get; set; } = new List<AnnotationSignal>();
 
@@ -57,25 +50,27 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("hatches")]
         public List<HatchSignal> Hatches { get; set; } = new List<HatchSignal>();
 
+        [JsonPropertyName("unresolved_objects")]
+        public List<UnresolvedObjectSignal> UnresolvedObjects { get; set; } = new List<UnresolvedObjectSignal>();
+
         [JsonPropertyName("extraction_summary")]
         public ExtractionSummary Summary { get; set; } = new ExtractionSummary();
     }
 
+    internal class Authentication
+    {
+        [JsonPropertyName("bearer_token")]
+        public string? BearerToken { get; set; }
+    }
+
     internal class ExtractionSummary
     {
-        [JsonPropertyName("total_objects")]
-        public int TotalObjects { get; set; }
-
-        [JsonPropertyName("total_rooms")]
-        public int TotalRooms { get; set; }
-
-        [JsonPropertyName("high_quality_count")]
-        public int HighQualityCount { get; set; }
-
-        [JsonPropertyName("medium_quality_count")]
-        public int MediumQualityCount { get; set; }
-
-        [JsonPropertyName("low_quality_count")]
-        public int LowQualityCount { get; set; }
+        [JsonPropertyName("total_objects")]         public int TotalObjects        { get; set; }
+        [JsonPropertyName("total_rooms")]           public int TotalRooms          { get; set; }
+        [JsonPropertyName("total_layers")]          public int TotalLayers         { get; set; }
+        [JsonPropertyName("unresolved_count")]      public int UnresolvedCount     { get; set; }
+        [JsonPropertyName("high_quality_count")]    public int HighQualityCount    { get; set; }
+        [JsonPropertyName("medium_quality_count")]  public int MediumQualityCount  { get; set; }
+        [JsonPropertyName("low_quality_count")]     public int LowQualityCount     { get; set; }
     }
 }

@@ -18,10 +18,12 @@ namespace AirenoOS.AutoCAD.Plugin
             // Shutdown guard — set flag before AutoCAD tears down so SaveComplete/Writeback abort cleanly
             Application.BeginQuit += (s, e) => IsShuttingDown = true;
 
-            // Hook SaveComplete on every newly activated document
-            Application.DocumentManager.DocumentActivated += OnDocumentActivated;
+            // Hook every document EXACTLY ONCE — at creation/open time.
+            // DocumentActivated fires on every tab/focus change, which would stack
+            // multiple SaveComplete subscribers and cause N POSTs per single save.
+            Application.DocumentManager.DocumentCreated += OnDocumentCreated;
 
-            // Also wire any already-open documents at load time
+            // Also wire any documents already open when the plugin is NETLOADed mid-session.
             foreach (Document open in Application.DocumentManager)
             {
                 HookSaveComplete(open);
@@ -36,7 +38,7 @@ namespace AirenoOS.AutoCAD.Plugin
             IsShuttingDown = true;
         }
 
-        private void OnDocumentActivated(object? sender, DocumentCollectionEventArgs e)
+        private void OnDocumentCreated(object? sender, DocumentCollectionEventArgs e)
         {
             HookSaveComplete(e.Document);
         }

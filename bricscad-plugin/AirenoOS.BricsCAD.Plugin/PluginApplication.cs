@@ -18,8 +18,16 @@ namespace AirenoOS.BricsCAD.Plugin
             // Subscribe to shutdown guard
             Application.BeginQuit += (s, e) => IsShuttingDown = true;
 
-            // Subscribe to save event
-            Application.DocumentManager.DocumentActivated += OnDocumentActivated;
+            // Hook every document EXACTLY ONCE — at creation/open time.
+            // DocumentActivated fires on every tab/focus change, which would stack
+            // multiple SaveComplete subscribers and cause N POSTs per single save.
+            Application.DocumentManager.DocumentCreated += OnDocumentCreated;
+
+            // Also wire any documents already open at plugin load time.
+            foreach (Document open in Application.DocumentManager)
+            {
+                HookSaveComplete(open);
+            }
 
             var ed = Application.DocumentManager.MdiActiveDocument?.Editor;
             ed?.WriteMessage("\nAirenoOS Plugin loaded. Commands: AIRENO_CONNECT, AIRENO_EXTRACT, AIRENO_WRITEBACK\n");
@@ -30,15 +38,19 @@ namespace AirenoOS.BricsCAD.Plugin
             IsShuttingDown = true;
         }
 
-        private void OnDocumentActivated(object? sender, DocumentCollectionEventArgs e)
+        private void OnDocumentCreated(object? sender, DocumentCollectionEventArgs e)
         {
-            if (e.Document == null) return;
+            HookSaveComplete(e.Document);
+        }
 
-            // Hook SaveComplete on each newly activated document
-            e.Document.Database.SaveComplete += (s, args) =>
+        private static void HookSaveComplete(Document? doc)
+        {
+            if (doc == null) return;
+
+            doc.Database.SaveComplete += (s, args) =>
             {
                 if (IsShuttingDown) return;
-                SaveHandler.OnSaveComplete(e.Document);
+                SaveHandler.OnSaveComplete(doc);
             };
         }
     }
