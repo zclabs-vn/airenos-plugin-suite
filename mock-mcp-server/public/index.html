@@ -107,12 +107,40 @@
       background: var(--panel);
     }
     .list-item {
-      padding: 12px 16px;
+      padding: 12px 16px 12px 38px;
       border-bottom: 1px solid var(--border);
       cursor: pointer;
+      position: relative;
     }
     .list-item:hover { background: var(--panel-2); }
-    .list-item.active { background: var(--panel-2); border-left: 3px solid var(--accent); padding-left: 13px; }
+    .list-item.active { background: var(--panel-2); border-left: 3px solid var(--accent); padding-left: 35px; }
+    .list-item .li-check {
+      position: absolute; left: 14px; top: 14px;
+      width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent);
+    }
+    .list-item .li-del {
+      position: absolute; top: 10px; right: 10px;
+      width: 20px; height: 20px; border-radius: 4px;
+      display: none; align-items: center; justify-content: center;
+      color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1;
+    }
+    .list-item:hover .li-del { display: flex; }
+    .li-del:hover { background: rgba(255,88,116,0.2); color: #ff5874; }
+    .bulk-bar {
+      padding: 8px 16px; background: var(--panel-2);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12px; color: var(--muted);
+      position: sticky; top: 0; z-index: 5;
+    }
+    .bulk-bar button {
+      font-size: 11px; padding: 3px 10px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--panel); color: var(--text);
+      cursor: pointer;
+    }
+    .bulk-bar button.danger { border-color: #ff5874; color: #ff5874; }
+    .bulk-bar button:hover { background: var(--panel-2); }
+    .bulk-bar .spacer { flex: 1; }
     .list-item .source {
       display: inline-block;
       padding: 2px 8px;
@@ -289,6 +317,7 @@
     let selectedId = null;
     let activeFilter = 'all';
     let lastItems = [];
+    const selectedIds = new Set();   // multi-select for batch delete
 
     // Dark-themed SweetAlert2 defaults — matches the inspector palette.
     const SwalDark = Swal.mixin({
@@ -372,7 +401,20 @@
         els.list.innerHTML = `<div class="empty">${msg}</div>`;
         return;
       }
-      els.list.innerHTML = items
+      // Drop selections that no longer exist (deleted elsewhere / scrolled out of index).
+      const visibleIds = new Set(items.map((it) => it.id));
+      for (const id of [...selectedIds]) if (!visibleIds.has(id)) selectedIds.delete(id);
+
+      const bulkBar = selectedIds.size > 0
+        ? `<div class="bulk-bar">
+             <span><b>${selectedIds.size}</b> selected</span>
+             <span class="spacer"></span>
+             <button id="bulk-clear">Clear</button>
+             <button id="bulk-delete" class="danger">Delete selected</button>
+           </div>`
+        : '';
+
+      const rows = items
         .map((it) => {
           const src = (it.summary?.source_software || 'unknown').toLowerCase();
           const time = new Date(it.receivedAt).toLocaleString();
@@ -384,8 +426,11 @@
             it.summary?.total_hatches ? `${it.summary.total_hatches} hatch` : null,
           ].filter(Boolean).join(' · ');
           const trigger = it.summary?.extraction_trigger || '-';
+          const checked = selectedIds.has(it.id) ? 'checked' : '';
           return `
             <div class="list-item ${it.id === selectedId ? 'active' : ''}" data-id="${it.id}">
+              <input type="checkbox" class="li-check" ${checked} title="Select" />
+              <span class="li-del" title="Delete this payload">×</span>
               <div>
                 <span class="source ${src}">${src}</span>
                 <span>${escapeHtmlText(it.summary?.source_software_version || '')}</span>
@@ -396,9 +441,76 @@
           `;
         })
         .join('');
+
+      els.list.innerHTML = bulkBar + rows;
+
       els.list.querySelectorAll('.list-item').forEach((node) => {
-        node.addEventListener('click', () => loadDetail(node.dataset.id));
+        const id = node.dataset.id;
+        // Body click → open detail (ignore clicks on the checkbox or delete button).
+        node.addEventListener('click', (e) => {
+          if (e.target.classList.contains('li-check') || e.target.classList.contains('li-del')) return;
+          loadDetail(id);
+        });
+        node.querySelector('.li-check').addEventListener('change', (e) => {
+          e.stopPropagation();
+          if (e.target.checked) selectedIds.add(id); else selectedIds.delete(id);
+          renderList(applyFilter(lastItems));
+        });
+        node.querySelector('.li-del').addEventListener('click', (e) => {
+          e.stopPropagation();
+          deletePayloads([id]);
+        });
       });
+
+      const bulkDel = document.getElementById('bulk-delete');
+      if (bulkDel) bulkDel.addEventListener('click', () => deletePayloads([...selectedIds]));
+      const bulkClr = document.getElementById('bulk-clear');
+      if (bulkClr) bulkClr.addEventListener('click', () => { selectedIds.clear(); renderList(applyFilter(lastItems)); });
+    }
+
+    // Delete one or many payloads with a confirm dialog, then refresh the list.
+    async function deletePayloads(ids) {
+      if (!ids || ids.length === 0) return;
+      const many = ids.length > 1;
+      const { isConfirmed } = await SwalDark.fire({
+        icon: 'warning',
+        title: many ? `Delete ${ids.length} payloads?` : 'Delete this payload?',
+        text: 'This removes the selected payload(s) from disk. This cannot be undone.',
+        showCancelButton: true,
+        confirmButtonText: many ? `Yes, delete ${ids.length}` : 'Yes, delete',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#ff5874',
+        reverseButtons: true,
+        focusCancel: true,
+      });
+      if (!isConfirmed) return;
+
+      try {
+        let res;
+        if (many) {
+          res = await fetch('/api/payloads', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+          });
+        } else {
+          res = await fetch(`/api/payloads/${ids[0]}`, { method: 'DELETE' });
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        ids.forEach((id) => selectedIds.delete(id));
+        // If the open detail was deleted, reset the inspector pane.
+        if (ids.includes(selectedId)) {
+          selectedId = null;
+          els.detail.textContent = 'Select a payload from the list to inspect.';
+          els.detail.classList.add('empty');
+          els.detailHeader.style.display = 'none';
+        }
+        await loadList();
+        Toast.fire({ icon: 'success', title: many ? `Deleted ${ids.length} payloads` : 'Payload deleted' });
+      } catch (err) {
+        Toast.fire({ icon: 'error', title: 'Delete failed: ' + err.message });
+      }
     }
 
     // Currently-loaded payload (used by Confirm dialog to read document_project_token).

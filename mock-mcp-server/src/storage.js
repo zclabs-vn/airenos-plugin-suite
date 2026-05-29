@@ -117,6 +117,32 @@ export class PayloadStore {
     this.index = [];
   }
 
+  // Delete one payload by id. Returns true if it existed and was removed.
+  async deleteById(id) {
+    if (!this.#isSafeId(id)) return false;
+    const existed = this.index.some((e) => e.id === id);
+    await fs.unlink(path.join(this.payloadDir, `${id}.json`)).catch(() => {});
+    this.index = this.index.filter((e) => e.id !== id);
+    return existed;
+  }
+
+  // Delete a batch of ids. Returns the count actually removed.
+  async deleteMany(ids) {
+    if (!Array.isArray(ids)) return 0;
+    const safe = ids.filter((id) => this.#isSafeId(id));
+    const present = new Set(this.index.map((e) => e.id));
+    let removed = 0;
+    await Promise.all(
+      safe.map(async (id) => {
+        if (present.has(id)) removed++;
+        await fs.unlink(path.join(this.payloadDir, `${id}.json`)).catch(() => {});
+      })
+    );
+    const toRemove = new Set(safe);
+    this.index = this.index.filter((e) => !toRemove.has(e.id));
+    return removed;
+  }
+
   // ── internals ─────────────────────────────────────────────────────────────
 
   #newId() {

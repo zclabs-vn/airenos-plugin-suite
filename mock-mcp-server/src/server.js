@@ -93,9 +93,22 @@ app.get('/api/payloads/:id', async (req, res) => {
   res.json(envelope);
 });
 
-app.delete('/api/payloads', async (_req, res) => {
+// Batch delete by ids in the body: { "ids": ["...", "..."] }.
+// No ids → legacy "clear all" behaviour.
+app.delete('/api/payloads', async (req, res) => {
+  const ids = req.body?.ids;
+  if (Array.isArray(ids)) {
+    const removed = await store.deleteMany(ids);
+    return res.json({ status: 'deleted', removed });
+  }
   await store.clearAll();
   res.json({ status: 'cleared' });
+});
+
+app.delete('/api/payloads/:id', async (req, res) => {
+  const removed = await store.deleteById(req.params.id);
+  if (!removed) return res.status(404).json({ error: 'not_found' });
+  res.json({ status: 'deleted', id: req.params.id });
 });
 
 // ── Writeback flow ────────────────────────────────────────────────────────────
