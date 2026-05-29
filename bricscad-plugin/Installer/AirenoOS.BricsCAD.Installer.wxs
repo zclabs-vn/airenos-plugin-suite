@@ -14,7 +14,8 @@
         Windows\
           AirenoOS.BricsCAD.Plugin.dll
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
   <Package
       Name="AirenoOS BricsCAD Plugin"
@@ -37,6 +38,25 @@
     <!-- Friendly product info shown in Add/Remove Programs -->
     <Property Id="ARPHELPLINK" Value="https://zclabs.vn" />
     <Property Id="ARPURLINFOABOUT" Value="https://zclabs.vn" />
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         BricsCAD detection
+         FileSearch probes for bricscad.exe under the standard install path.
+         If found, BRICSCAD_FOUND is set to the full path (truthy in conditions).
+         ─────────────────────────────────────────────────────────────────────── -->
+    <Property Id="BRICSCAD_FOUND" Secure="yes">
+      <DirectorySearch Id="BricscadV26PathSearch" Path="[ProgramFiles64Folder]Bricsys\BricsCAD V26 en_US" Depth="0">
+        <FileSearch Id="BricscadV26ExeSearch" Name="bricscad.exe" />
+      </DirectorySearch>
+    </Property>
+
+    <!-- Refuse to install if BricsCAD is not detected. -->
+    <Launch Condition="BRICSCAD_FOUND"
+            Message="BricsCAD V26 was not detected (expected at &quot;C:\Program Files\Bricsys\BricsCAD V26 en_US&quot;). Install BricsCAD first, then re-run this installer." />
+
+    <!-- Wizard: Welcome -> License (EULA) -> Progress -> Finish -->
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
     <Feature Id="Main" Title="AirenoOS BricsCAD Plugin" Level="1" Display="expand">
       <ComponentGroupRef Id="BundleFiles" />

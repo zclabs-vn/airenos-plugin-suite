@@ -62,6 +62,7 @@ Push-Location $InstallerDir
 try {
     wix build AirenoOS.BricsCAD.Installer.wxs `
         -arch x64 `
+        -ext WixToolset.UI.wixext `
         -d "PluginDll=$PublishedDll" `
         -o $MsiOut
 }
