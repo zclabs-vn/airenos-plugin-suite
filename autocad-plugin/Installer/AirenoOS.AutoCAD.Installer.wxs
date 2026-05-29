@@ -21,7 +21,11 @@
       Compressed="yes"
       InstallerVersion="500">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <!-- AllowSameVersionUpgrades: each wix build generates a fresh ProductCode, so a
+         rebuild at the SAME version must still remove the prior install instead of
+         stacking a second Add/Remove-Programs entry. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- ───────────────────────────────────────────────────────────────────────
