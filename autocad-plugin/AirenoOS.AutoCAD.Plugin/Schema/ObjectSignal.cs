@@ -11,6 +11,14 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
     internal class ObjectSignal
     {
         [JsonPropertyName("group_1_identity")]       public Group1Identity       Group1Identity       { get; set; } = new();
+        // Brian feedback (2026-06-05) item #2: when AirenoOS has previously assigned a
+        // backpack_id and the plugin has stored it locally in XDATA, the plugin echoes it
+        // back via this block — so AirenoOS knows it has seen this object before. Block is
+        // omitted entirely when the plugin has nothing to echo back (raw / unconfirmed
+        // objects), per Brian's explicit rule.
+        [JsonPropertyName("airenoos_ref")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public AirenoosRef? AirenoosRef { get; set; }
         [JsonPropertyName("group_2_naming")]         public Group2Naming         Group2Naming         { get; set; } = new();
         [JsonPropertyName("group_3_spatial")]        public Group3Spatial        Group3Spatial        { get; set; } = new();
         [JsonPropertyName("group_4_geometry")]       public Group4Geometry       Group4Geometry       { get; set; } = new();
@@ -22,13 +30,27 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         // per spec's existing_metadata passthrough design. No standalone field at object level.
     }
 
+    /// <summary>
+    /// AirenoOS readback marker — emitted when the plugin echoes back an `aireno_backpack_id`
+    /// that AirenoOS previously assigned and the plugin stored locally in XDATA. The fixed
+    /// `ref_source: "xdata_readback"` + `ref_assigned_by: "airenoos"` make explicit that the
+    /// plugin did NOT invent this ID, it only read it back. Per Brian (2026-06-05).
+    /// </summary>
+    internal class AirenoosRef
+    {
+        [JsonPropertyName("backpack_id")]     public string? BackpackId    { get; set; }
+        [JsonPropertyName("ref_source")]      public string  RefSource     { get; set; } = "xdata_readback";
+        [JsonPropertyName("ref_assigned_by")] public string  RefAssignedBy { get; set; } = "airenoos";
+    }
+
     // ── G1 — Native Object Identity ───────────────────────────────────────────────
     internal class Group1Identity
     {
         [JsonPropertyName("native_id")]            public string?  NativeId          { get; set; }
         [JsonPropertyName("native_id_type")]       public string   NativeIdType      { get; set; } = "xdata_uuid";
         [JsonPropertyName("native_id_stability")]  public string   NativeIdStability { get; set; } = "stable";
-        [JsonPropertyName("aireno_backpack_id")]   public string?  AirenoBackpackId  { get; set; }
+        // aireno_backpack_id removed from Group 1 per Brian feedback (2026-06-05) item #2 —
+        // moved out to the per-object `airenoos_ref` block alongside this group.
         [JsonPropertyName("identity_state")]       public string   IdentityState     { get; set; } = "raw";
         [JsonPropertyName("link_state")]           public string   LinkState         { get; set; } = "unlinked";
         [JsonPropertyName("is_definition")]        public bool     IsDefinition      { get; set; }
@@ -53,6 +75,11 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("scene_or_view_name")]        public string?             SceneOrViewName       { get; set; }
         [JsonPropertyName("naming_origin")]             public string?             NamingOrigin          { get; set; }
         [JsonPropertyName("raw_aliases")]               public List<string>?       RawAliases            { get; set; }
+        // Brian #8: snapshot of the visible label the user saw before the most recent
+        // writeback overwrote it. Null/absent when no writeback has happened yet.
+        [JsonPropertyName("aireno_previous_label")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string?             AirenoPreviousLabel  { get; set; }
     }
 
     // ── G3 — Spatial and Container Context ────────────────────────────────────────
@@ -114,7 +141,7 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("source_software")]         public string  SourceSoftware        { get; set; } = "autocad";
         [JsonPropertyName("source_software_version")] public string  SourceSoftwareVersion { get; set; } = string.Empty;
         [JsonPropertyName("source_software_type")]    public string  SourceSoftwareType    { get; set; } = "2d_cad";
-        [JsonPropertyName("plugin_version")]          public string  PluginVersion         { get; set; } = "1.0.0";
+        [JsonPropertyName("plugin_version")]          public string  PluginVersion         { get; set; } = "1.0.2";
         [JsonPropertyName("file_name_hash")]          public string  FileNameHash          { get; set; } = string.Empty;
         [JsonPropertyName("file_name_display")]       public string? FileNameDisplay       { get; set; }
         [JsonPropertyName("document_project_token")]  public string  DocumentProjectToken  { get; set; } = string.Empty;
@@ -196,7 +223,11 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("zone_number")]                public string?        ZoneNumber                { get; set; }
         [JsonPropertyName("zone_category")]              public string?        ZoneCategory              { get; set; }
         [JsonPropertyName("contained_object_native_ids")] public List<string>? ContainedObjectNativeIds  { get; set; }
-        [JsonPropertyName("aireno_backpack_id")]         public string?        AirenoBackpackId          { get; set; }
+        // aireno_backpack_id moved out to per-room `airenoos_ref` block per Brian #2 —
+        // same readback pattern as ObjectSignal. Omitted when no backpack_id is stored.
+        [JsonPropertyName("airenoos_ref")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public AirenoosRef? AirenoosRef { get; set; }
     }
 
     internal class LayerSignal
@@ -212,33 +243,40 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("is_frozen")]    public bool     IsFrozen    { get; set; }
     }
 
+    // v0.3 Developer doc Group 10
     internal class AnnotationSignal
     {
-        [JsonPropertyName("native_id")]   public string?            NativeId   { get; set; }
-        [JsonPropertyName("type")]        public string?            Type       { get; set; }
-        [JsonPropertyName("content")]     public string?            Content    { get; set; }
-        [JsonPropertyName("layer")]       public string?            Layer      { get; set; }
-        [JsonPropertyName("position")]    public SpatialPosition?   Position   { get; set; }
-        [JsonPropertyName("nearby_ids")]  public List<string>?      NearbyIds  { get; set; }
+        [JsonPropertyName("native_id")]            public string?       NativeId           { get; set; }
+        [JsonPropertyName("text_content")]         public string?       TextContent        { get; set; }
+        [JsonPropertyName("entity_type")]          public string?       EntityType         { get; set; }
+        [JsonPropertyName("layer")]                public string?       Layer              { get; set; }
+        [JsonPropertyName("location")]             public Point2D?      Location           { get; set; }
+        [JsonPropertyName("layout_context")]       public string?       LayoutContext      { get; set; }
+        [JsonPropertyName("nearby_object_ids")]    public List<string>? NearbyObjectIds    { get; set; }
+        [JsonPropertyName("annotation_type_hint")] public string?       AnnotationTypeHint { get; set; }
     }
 
+    // v0.3 Developer doc Group 11
     internal class DimensionSignal
     {
-        [JsonPropertyName("native_id")]      public string?            NativeId      { get; set; }
-        [JsonPropertyName("measurement")]    public double?            Measurement   { get; set; }
-        [JsonPropertyName("dimension_type")] public string?            DimensionType { get; set; }
-        [JsonPropertyName("layer")]          public string?            Layer         { get; set; }
-        [JsonPropertyName("position")]       public SpatialPosition?   Position      { get; set; }
+        [JsonPropertyName("native_id")]            public string?       NativeId            { get; set; }
+        [JsonPropertyName("measured_value")]       public double?       MeasuredValue       { get; set; }
+        [JsonPropertyName("unit")]                 public string?       Unit                { get; set; }
+        [JsonPropertyName("dimension_type")]       public string?       DimensionType       { get; set; }
+        [JsonPropertyName("layer")]                public string?       Layer               { get; set; }
+        [JsonPropertyName("location")]             public Point2D?      Location            { get; set; }
+        [JsonPropertyName("measured_object_ids")]  public List<string>? MeasuredObjectIds   { get; set; }
     }
 
+    // v0.3 Developer doc Group 12
     internal class HatchSignal
     {
-        [JsonPropertyName("native_id")]    public string?         NativeId    { get; set; }
-        [JsonPropertyName("pattern_name")] public string?         PatternName { get; set; }
-        [JsonPropertyName("pattern_type")] public string?         PatternType { get; set; }
-        [JsonPropertyName("layer")]        public string?         Layer       { get; set; }
-        [JsonPropertyName("scale")]        public double?         Scale       { get; set; }
-        [JsonPropertyName("boundary_ids")] public List<string>?   BoundaryIds { get; set; }
+        [JsonPropertyName("native_id")]           public string?  NativeId          { get; set; }
+        [JsonPropertyName("pattern_name")]        public string?  PatternName       { get; set; }
+        [JsonPropertyName("layer")]               public string?  Layer             { get; set; }
+        [JsonPropertyName("boundary_native_id")]  public string?  BoundaryNativeId  { get; set; }
+        [JsonPropertyName("nearby_finish_note")]  public string?  NearbyFinishNote  { get; set; }
+        [JsonPropertyName("location_centroid")]   public Point2D? LocationCentroid  { get; set; }
     }
 
     internal class UnresolvedObjectSignal
@@ -247,5 +285,99 @@ namespace AirenoOS.AutoCAD.Plugin.Schema
         [JsonPropertyName("raw_name")]  public string? RawName  { get; set; }
         [JsonPropertyName("reason")]    public string? Reason   { get; set; }
         [JsonPropertyName("detail")]    public string? Detail   { get; set; }
+    }
+
+    // ── v0.3 Layer 2 extended top-level signal classes (Developer doc Groups 9–15) ────
+
+    /// <summary>Group 9 — CAD Tables and Schedules. Empty for AutoCAD/BricsCAD today
+    /// (vanilla DWG doesn't store discrete AcDbTable schedules — they live as block
+    /// attributes + MText, captured via annotations + attribute_text).</summary>
+    internal class CadTableSignal
+    {
+        [JsonPropertyName("table_type_hint")]      public string?       TableTypeHint     { get; set; }
+        [JsonPropertyName("title_text")]           public string?       TitleText         { get; set; }
+        [JsonPropertyName("layer")]                public string?       Layer             { get; set; }
+        [JsonPropertyName("location")]             public Point2D?      Location          { get; set; }
+        [JsonPropertyName("layout_context")]       public string?       LayoutContext     { get; set; }
+        [JsonPropertyName("rows")]                 public List<CadTableRow>? Rows         { get; set; }
+        [JsonPropertyName("nearby_block_tag_refs")] public List<string>? NearbyBlockTagRefs { get; set; }
+    }
+
+    internal class CadTableRow
+    {
+        [JsonPropertyName("cells")] public List<string>? Cells { get; set; }
+    }
+
+    /// <summary>Group 13 — Document-level xref summary. Complements the per-object
+    /// `group_7_source.xref_*` fields with a single summary block.</summary>
+    internal class XrefReferenceSignal
+    {
+        [JsonPropertyName("xref_name")]            public string? XrefName            { get; set; }
+        [JsonPropertyName("xref_file_hash")]       public string? XrefFileHash        { get; set; }
+        [JsonPropertyName("xref_path_status")]     public string? XrefPathStatus      { get; set; }
+        [JsonPropertyName("object_count_in_xref")] public int     ObjectCountInXref   { get; set; }
+    }
+
+    /// <summary>Group 13 companion — document-level counts of native vs xref-sourced
+    /// entities so the backend can scan source distribution without iterating objects.</summary>
+    internal class EntitySourceSummary
+    {
+        [JsonPropertyName("native_count")] public int          NativeCount  { get; set; }
+        [JsonPropertyName("xref_count")]   public int          XrefCount    { get; set; }
+        [JsonPropertyName("xref_sources")] public List<string> XrefSources  { get; set; } = new List<string>();
+    }
+
+    /// <summary>Group 14 — Extended per-layer properties (color RGB, linetype, lineweight,
+    /// frozen/locked/visible, xref-layer flag). The basic `layers_or_tags[]` already
+    /// carries 7 fields; this richer array runs alongside per v0.3 §Group 14 note.</summary>
+    internal class LayerPropertiesSignal
+    {
+        [JsonPropertyName("name")]         public string?     Name         { get; set; }
+        [JsonPropertyName("color_index")]  public int?        ColorIndex   { get; set; }
+        [JsonPropertyName("color_rgb")]    public RgbColor?   ColorRgb     { get; set; }
+        [JsonPropertyName("linetype")]     public string?     Linetype     { get; set; }
+        [JsonPropertyName("lineweight")]   public int?        Lineweight   { get; set; }
+        [JsonPropertyName("frozen")]       public bool        Frozen       { get; set; }
+        [JsonPropertyName("locked")]       public bool        Locked       { get; set; }
+        [JsonPropertyName("visible")]      public bool        Visible      { get; set; }
+        [JsonPropertyName("object_count")] public int         ObjectCount  { get; set; }
+        [JsonPropertyName("is_xref_layer")] public bool       IsXrefLayer  { get; set; }
+    }
+
+    internal class RgbColor
+    {
+        [JsonPropertyName("r")] public int R { get; set; }
+        [JsonPropertyName("g")] public int G { get; set; }
+        [JsonPropertyName("b")] public int B { get; set; }
+    }
+
+    /// <summary>Group 15 — Dynamic blocks as a top-level array. Mirrors per-object
+    /// `group_6_metadata.existing_metadata["dynamic_block"]` so the backend can scan
+    /// dynamic state without iterating every object.</summary>
+    internal class DynamicBlockTopLevel
+    {
+        [JsonPropertyName("native_id")]               public string? NativeId             { get; set; }
+        [JsonPropertyName("block_definition_name")]   public string? BlockDefinitionName  { get; set; }
+        [JsonPropertyName("active_visibility_state")] public string? ActiveVisibilityState { get; set; }
+        [JsonPropertyName("dynamic_properties")]      public Dictionary<string, string?>? DynamicProperties { get; set; }
+        [JsonPropertyName("is_dynamic")]              public bool    IsDynamic            { get; set; } = true;
+    }
+
+    /// <summary>BIM-only top-level field — emitted empty by the 2D CAD plugin so the
+    /// envelope shape stays uniform across software types. Revit will populate this.</summary>
+    internal class LevelSignal
+    {
+        [JsonPropertyName("native_id")]              public string? NativeId            { get; set; }
+        [JsonPropertyName("name")]                   public string? Name                { get; set; }
+        [JsonPropertyName("elevation")]              public double  Elevation           { get; set; }
+        [JsonPropertyName("unit")]                   public string  Unit                { get; set; } = "mm";
+        [JsonPropertyName("is_building_story")]      public bool    IsBuildingStory     { get; set; }
+        [JsonPropertyName("object_count_on_level")]  public int     ObjectCountOnLevel  { get; set; }
+    }
+
+    internal class Point2D
+    {
+        [JsonPropertyName("x")] public double X { get; set; }
+        [JsonPropertyName("y")] public double Y { get; set; }
     }
 }

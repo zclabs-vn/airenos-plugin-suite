@@ -15,8 +15,34 @@ namespace AirenoOS.AutoCAD.Plugin
 
         public void Initialize()
         {
-            // Shutdown guard — set flag before AutoCAD tears down so SaveComplete/Writeback abort cleanly
-            Application.BeginQuit += (s, e) => IsShuttingDown = true;
+            // Brian feedback #5 (2026-06-05) — session-end sync.
+            //
+            // Two events cover all paths to "user is closing something":
+            //   DocumentToBeDestroyed → fires per-document right before each doc tears down.
+            //     Catches both "Close single tab" and "Close AutoCAD" (each open doc fires
+            //     this event in turn before BeginQuit). The doc is still readable here —
+            //     unlike at BeginQuit, where MdiActiveDocument has already gone null.
+            //   BeginQuit → fires once after all docs are gone. We use it only for the
+            //     IsShuttingDown flag (#6 shutdown guard) since by then there's nothing
+            //     to extract.
+            Application.DocumentManager.DocumentToBeDestroyed += (s, e) =>
+            {
+                SaveHandler.SessionLog($"=== DocumentToBeDestroyed fired ({e.Document?.Name}) ===");
+                try
+                {
+                    if (e.Document != null) SaveHandler.OnSessionEnd(e.Document);
+                }
+                catch (System.Exception ex)
+                {
+                    SaveHandler.SessionLog($"DocumentToBeDestroyed handler threw: {ex.GetType().Name}: {ex.Message}");
+                }
+            };
+
+            Application.BeginQuit += (s, e) =>
+            {
+                SaveHandler.SessionLog("=== BeginQuit fired (setting shutdown flag) ===");
+                IsShuttingDown = true;
+            };
 
             // Hook every document EXACTLY ONCE — at creation/open time.
             // DocumentActivated fires on every tab/focus change, which would stack

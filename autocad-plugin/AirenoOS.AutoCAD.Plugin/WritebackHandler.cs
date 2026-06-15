@@ -63,14 +63,35 @@ namespace AirenoOS.AutoCAD.Plugin
 
             // Preserve existing native_id (UUID at field 0); rewrite fields 1..5
             var existingUuid = XdataHelper.ReadField(entity, fieldIndex: 0) ?? Guid.NewGuid().ToString();
+
+            // Brian feedback #8 (2026-06-05) — preserve the label the user saw immediately
+            // before this writeback. On subsequent writebacks this is the previous
+            // confirmed_label (slot 3); on the very first writeback the user saw the block
+            // definition name (or the entity type name for non-block entities). Without
+            // this snapshot every writeback would erase the prior label and break audit.
+            var previousLabel = XdataHelper.ReadField(entity, fieldIndex: 3);
+            if (string.IsNullOrEmpty(previousLabel))
+            {
+                if (entity is BlockReference br)
+                {
+                    var btr = (BlockTableRecord)tr.GetObject(br.BlockTableRecord, OpenMode.ForRead);
+                    previousLabel = btr.Name;
+                }
+                else
+                {
+                    previousLabel = entity.GetType().Name;
+                }
+            }
+
             XdataHelper.WriteFreshXdata(
                 entity,
-                nativeId:         existingUuid,
-                airenoBackpackId: item.AirenoBackpackId ?? string.Empty,
-                identityState:    "confirmed",
-                confirmedLabel:   item.ConfirmedLabel ?? string.Empty,
-                confirmedRoomId:  item.ConfirmedRoomId ?? string.Empty,
-                lastSynced:       DateTime.UtcNow.ToString("o")
+                nativeId:            existingUuid,
+                airenoBackpackId:    item.AirenoBackpackId ?? string.Empty,
+                identityState:       "confirmed",
+                confirmedLabel:      item.ConfirmedLabel ?? string.Empty,
+                confirmedRoomId:     item.ConfirmedRoomId ?? string.Empty,
+                lastSynced:          DateTime.UtcNow.ToString("o"),
+                airenoPreviousLabel: previousLabel ?? string.Empty
             );
         }
     }

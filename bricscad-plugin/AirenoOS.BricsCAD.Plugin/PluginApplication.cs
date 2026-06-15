@@ -15,8 +15,31 @@ namespace AirenoOS.BricsCAD.Plugin
 
         public void Initialize()
         {
-            // Subscribe to shutdown guard
-            Application.BeginQuit += (s, e) => IsShuttingDown = true;
+            // Brian feedback #5 (2026-06-05) — session-end sync.
+            //
+            // Same pattern as AutoCAD plugin: DocumentToBeDestroyed fires per-document
+            // before each doc tears down (catches both "Close single tab" and "Close
+            // BricsCAD"), while BeginQuit fires once after all docs are gone and is
+            // only used for the IsShuttingDown flag (#6 shutdown guard). MdiActiveDocument
+            // is unreliable at BeginQuit — verified empirically in v1.0.5 testing.
+            Application.DocumentManager.DocumentToBeDestroyed += (s, e) =>
+            {
+                SaveHandler.SessionLog($"=== DocumentToBeDestroyed fired ({e.Document?.Name}) ===");
+                try
+                {
+                    if (e.Document != null) SaveHandler.OnSessionEnd(e.Document);
+                }
+                catch (System.Exception ex)
+                {
+                    SaveHandler.SessionLog($"DocumentToBeDestroyed handler threw: {ex.GetType().Name}: {ex.Message}");
+                }
+            };
+
+            Application.BeginQuit += (s, e) =>
+            {
+                SaveHandler.SessionLog("=== BeginQuit fired (setting shutdown flag) ===");
+                IsShuttingDown = true;
+            };
 
             // Hook every document EXACTLY ONCE — at creation/open time.
             // DocumentActivated fires on every tab/focus change, which would stack

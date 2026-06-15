@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -20,6 +21,20 @@ namespace AirenoOS.AutoCAD.Plugin.Communicator
     /// </summary>
     internal static class HttpSender
     {
+        static HttpSender()
+        {
+            // AutoCAD 2024 runs on .NET Framework 4.8 where ServicePointManager defaults
+            // can leave TLS 1.0 enabled and TLS 1.3 disabled — Cloudflare-fronted endpoints
+            // (mock-mcp.demo-hub.dev) reject those. Force-enable TLS 1.2 + 1.3 (1.3 const
+            // exists from .NETFx 4.8) so handshakes succeed across both target frameworks.
+            try
+            {
+                ServicePointManager.SecurityProtocol |=
+                    SecurityProtocolType.Tls12 | (SecurityProtocolType)12288 /* Tls13 */;
+            }
+            catch { /* OS may not support Tls13 — Tls12 alone is enough for Cloudflare */ }
+        }
+
         private static readonly HttpClient Client = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(30)
@@ -75,11 +90,9 @@ namespace AirenoOS.AutoCAD.Plugin.Communicator
                 return;
             }
 
-            // Echo bearer in body per Canonical Schema v0.2 envelope spec.
-            // The HTTP Authorization header still carries it for actual auth;
-            // body duplication is what the spec example shows.
-            payload.Authentication = new Authentication { BearerToken = token };
-
+            // v0.3 + Brian feedback (2026-06-05) item #3: the bearer token travels in
+            // the HTTP Authorization header ONLY. Never duplicate it into the JSON body —
+            // that leaks the token into log files and the offline-retry queue on disk.
             var json = JsonSerializer.Serialize(payload, JsonOpts);
 
             // First attempt + one retry on transient failure
@@ -88,6 +101,48 @@ namespace AirenoOS.AutoCAD.Plugin.Communicator
             if (await TrySend(endpoint, token, json).ConfigureAwait(false)) return;
 
             PersistOffline(payload, reason: "http_failed");
+        }
+
+        /// <summary>
+        /// Blocking POST with a tight timeout — used only from the Application.BeginQuit
+        /// handler (Brian feedback #5: session-end sync). The async PostAsync path can't
+        /// be used at shutdown because AutoCAD tears down the runtime before fire-and-forget
+        /// tasks can complete. On any failure the payload is persisted to the offline queue
+        /// with a 'session_end_*' reason suffix so the next session retries it.
+        /// </summary>
+        public static void PostSync(Database db, ExtractionPayload payload, int timeoutMs)
+        {
+            string endpoint, token;
+            try
+            {
+                (endpoint, token) = ConnectionConfig.Load(db);
+            }
+            catch
+            {
+                PersistOffline(payload, reason: "session_end_no_config");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(token))
+            {
+                PersistOffline(payload, reason: "session_end_no_endpoint_or_token");
+                return;
+            }
+
+            string json;
+            try { json = JsonSerializer.Serialize(payload, JsonOpts); }
+            catch { PersistOffline(payload, reason: "session_end_serialize_failed"); return; }
+
+            try
+            {
+                var task = TrySend(endpoint, token, json);
+                if (task.Wait(timeoutMs) && task.Result) return;
+                PersistOffline(payload, reason: "session_end_http_failed");
+            }
+            catch
+            {
+                PersistOffline(payload, reason: "session_end_threw");
+            }
         }
 
         /// <summary>
@@ -133,14 +188,35 @@ namespace AirenoOS.AutoCAD.Plugin.Communicator
 
                     using (var resp = await Client.SendAsync(req).ConfigureAwait(false))
                     {
-                        return resp.IsSuccessStatusCode;
+                        if (resp.IsSuccessStatusCode) return true;
+                        string body = "";
+                        try { body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false); } catch { }
+                        LogError($"POST {endpoint} → {(int)resp.StatusCode} {resp.ReasonPhrase}\n{body}");
+                        return false;
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                LogError($"POST {endpoint} threw: {ex.GetType().Name}: {ex.Message}\n{ex.InnerException?.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Last HTTP failure detail — single rotating file so diagnostics are easy to find.
+        /// Plugin never surfaces this to the AutoCAD command line (POSTs are fire-and-forget),
+        /// so without this file there's no way to tell why the offline queue is growing.
+        /// </summary>
+        private static void LogError(string message)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(PendingDir)!);
+                var path = Path.Combine(Path.GetDirectoryName(PendingDir)!, "last_error.txt");
+                File.WriteAllText(path, $"[{DateTime.UtcNow:O}]\n{message}");
+            }
+            catch { /* nowhere to fall back to */ }
         }
 
         private static void PersistOffline(ExtractionPayload payload, string reason)

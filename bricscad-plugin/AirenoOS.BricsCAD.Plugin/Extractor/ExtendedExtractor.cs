@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Bricscad.ApplicationServices;
 using Teigha.DatabaseServices;
 using Teigha.Geometry;
@@ -40,10 +43,10 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                             TryAddText(payload, texts, mt.Contents, mt.Location, mt.Layer, mt.Handle, "MText");
                             break;
                         case Dimension dim:
-                            TryAddDimension(payload, dim);
+                            TryAddDimension(payload, dim);  // dim XDATA read via dim.GetXDataForApplication — no tr needed
                             break;
                         case Hatch h:
-                            TryAddHatch(payload, h);
+                            TryAddHatch(tr, payload, h);
                             break;
                     }
                 }
@@ -52,6 +55,13 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 EnrichDynamicBlocks(tr, ms, payload);
                 AttachNearbyText(payload, texts);
                 EnrichRoomLabels(tr, ms, payload, texts);
+
+                // v0.3 Developer doc Groups 13-15 — mirror to top-level arrays
+                PopulateTopLevelXrefReferences(tr, bt, payload);
+                PopulateTopLevelDynamicBlocks(payload);
+                PopulateExtendedLayerProperties(tr, db, payload);
+                PopulateEntitySourceSummary(payload);
+                ComputeExtractionTier(payload);
 
                 tr.Commit();
             }
@@ -73,13 +83,26 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             var handle = h.Value.ToString("X");
             payload.Annotations.Add(new AnnotationSignal
             {
-                NativeId = handle,
-                Type     = kind,
-                Content  = content,
-                Layer    = layer,
-                Position = new SpatialPosition { X = pos.X, Y = pos.Y, Z = pos.Z, Unit = "mm" }
+                NativeId           = handle,
+                EntityType         = kind,
+                TextContent        = content,
+                Layer              = layer,
+                Location           = new Point2D { X = pos.X, Y = pos.Y },
+                LayoutContext      = null,
+                AnnotationTypeHint = InferAnnotationTypeHint(content!, layer)
             });
             bucket.Add((content, pos, layer, handle));
+        }
+
+        private static string? InferAnnotationTypeHint(string content, string layer)
+        {
+            var l = layer.ToUpperInvariant();
+            if (l.Contains("ROOM") || l.Contains("AREA"))  return "room_label";
+            if (l.Contains("DOOR"))                         return "door_tag";
+            if (l.Contains("GLAZ") || l.Contains("WIN"))    return "window_tag";
+            if (l.Contains("DIM") || l.Contains("ANNO-DIM")) return "dimension_note";
+            if (l.Contains("FNSH") || l.Contains("FINISH")) return "finish_note";
+            return null;
         }
 
         /// <summary>
@@ -125,9 +148,9 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             // Inverse mapping: for each annotation, list object native_ids that include it
             foreach (var ann in payload.Annotations)
             {
-                if (ann.Position == null) continue;
-                ann.NearbyIds = payload.Objects
-                    .Where(o => o.Group2Naming.NearbyTextLabels != null && o.Group2Naming.NearbyTextLabels.Contains(ann.Content ?? ""))
+                if (ann.Location == null) continue;
+                ann.NearbyObjectIds = payload.Objects
+                    .Where(o => o.Group2Naming.NearbyTextLabels != null && o.Group2Naming.NearbyTextLabels.Contains(ann.TextContent ?? ""))
                     .Select(o => o.Group1Identity.NativeId ?? "")
                     .Where(s => !string.IsNullOrEmpty(s))
                     .ToList();
@@ -138,17 +161,30 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
         private static void TryAddDimension(ExtractionPayload payload, Dimension dim)
         {
+            var dimXdataId = XdataHelper.ReadField(dim, 0);
+            var dimType = ClassifyDimensionType(dim);
             payload.Dimensions.Add(new DimensionSignal
             {
-                NativeId      = dim.Handle.Value.ToString("X"),
-                Measurement   = SafeMeasurement(dim),
-                DimensionType = dim.GetType().Name,
-                Layer         = dim.Layer,
-                Position      = new SpatialPosition
-                {
-                    X = dim.TextPosition.X, Y = dim.TextPosition.Y, Z = dim.TextPosition.Z, Unit = "mm"
-                }
+                NativeId          = !string.IsNullOrEmpty(dimXdataId) ? dimXdataId : dim.Handle.Value.ToString("X"),
+                MeasuredValue     = SafeMeasurement(dim),
+                // Angular dims measure in degrees; everything else in drawing units (mm).
+                Unit              = dimType == "angular" ? "deg" : "mm",
+                DimensionType     = dimType,
+                Layer             = dim.Layer,
+                Location          = new Point2D { X = dim.TextPosition.X, Y = dim.TextPosition.Y },
+                MeasuredObjectIds = null
             });
+        }
+
+        private static string ClassifyDimensionType(Dimension dim)
+        {
+            var name = dim.GetType().Name;
+            if (name.Contains("Aligned") || name.Contains("Rotated")) return "linear";
+            if (name.Contains("Angular"))                              return "angular";
+            if (name.Contains("Radial"))                               return "radial";
+            if (name.Contains("Diametric"))                            return "diametric";
+            if (name.Contains("Ordinate"))                             return "ordinate";
+            return "unknown";
         }
 
         private static double? SafeMeasurement(Dimension dim)
@@ -158,11 +194,12 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
         // ── Hatches ──────────────────────────────────────────────────────────────────
 
-        private static void TryAddHatch(ExtractionPayload payload, Hatch h)
+        private static void TryAddHatch(Transaction tr, ExtractionPayload payload, Hatch h)
         {
-            // Associative hatches track their source-boundary entities; pull their handles
-            // so Brian's MCP can correlate hatch → polyline/circle/etc that defines the area.
-            List<string>? boundaryIds = null;
+            // v0.3 Group 12: single boundary native_id (first associative source). After
+            // Brian #7, the boundary points at the polyline's XDATA UUID when available,
+            // falling back to the Teigha handle until AIRENO_EXTRACT has written it.
+            string? boundaryNativeId = null;
             try
             {
                 if (h.Associative)
@@ -170,22 +207,40 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                     var ids = h.GetAssociatedObjectIds();
                     if (ids != null && ids.Count > 0)
                     {
-                        boundaryIds = new List<string>(ids.Count);
-                        foreach (ObjectId bid in ids)
-                            boundaryIds.Add(bid.Handle.Value.ToString("X"));
+                        var boundaryEnt = tr.GetObject(ids[0], OpenMode.ForRead) as Entity;
+                        if (boundaryEnt != null)
+                        {
+                            var bx = XdataHelper.ReadField(boundaryEnt, 0);
+                            boundaryNativeId = !string.IsNullOrEmpty(bx)
+                                ? bx
+                                : ids[0].Handle.Value.ToString("X");
+                        }
                     }
                 }
             }
-            catch { /* fall through with null boundaryIds */ }
+            catch { /* leave null */ }
 
+            Point2D? centroid = null;
+            try
+            {
+                var ext = h.GeometricExtents;
+                centroid = new Point2D
+                {
+                    X = (ext.MinPoint.X + ext.MaxPoint.X) * 0.5,
+                    Y = (ext.MinPoint.Y + ext.MaxPoint.Y) * 0.5
+                };
+            }
+            catch { /* leave null */ }
+
+            var hatchXdataId = XdataHelper.ReadField(h, 0);
             payload.Hatches.Add(new HatchSignal
             {
-                NativeId    = h.Handle.Value.ToString("X"),
-                PatternName = h.PatternName,
-                PatternType = h.PatternType.ToString(),
-                Layer       = h.Layer,
-                Scale       = h.PatternScale,
-                BoundaryIds = boundaryIds
+                NativeId         = !string.IsNullOrEmpty(hatchXdataId) ? hatchXdataId : h.Handle.Value.ToString("X"),
+                PatternName      = h.PatternName,
+                Layer            = h.Layer,
+                BoundaryNativeId = boundaryNativeId,
+                NearbyFinishNote = null,
+                LocationCentroid = centroid
             });
         }
 
@@ -291,12 +346,19 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
         {
             if (payload.Rooms.Count == 0 || payload.Objects.Count == 0) return;
 
-            var rooms = new List<(string Handle, Extents3d Bbox)>();
+            // Brian #7: prefer the AIRENO XDATA UUID over the handle so that
+            // room_or_zone_native_id stays consistent with rooms[].native_id.
+            var rooms = new List<(string Id, Extents3d Bbox)>();
             foreach (ObjectId id in ms)
             {
                 var pl = tr.GetObject(id, OpenMode.ForRead) as Polyline;
                 if (pl == null || !pl.Closed) continue;
-                try { rooms.Add((pl.Handle.Value.ToString("X"), pl.GeometricExtents)); }
+                try
+                {
+                    var ux = XdataHelper.ReadField(pl, 0);
+                    var roomId = !string.IsNullOrEmpty(ux) ? ux! : pl.Handle.Value.ToString("X");
+                    rooms.Add((roomId, pl.GeometricExtents));
+                }
                 catch { /* no extents → skip */ }
             }
             if (rooms.Count == 0) return;
@@ -307,15 +369,15 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 if (sp == null) continue;
                 var p = new Point3d(sp.X, sp.Y, sp.Z);
 
-                string? hostRoomHandle = null;
+                string? hostRoomId = null;
                 Extents3d hostBbox = default;
                 foreach (var r in rooms)
                 {
-                    if (ContainsXY(r.Bbox, p)) { hostRoomHandle = r.Handle; hostBbox = r.Bbox; break; }
+                    if (ContainsXY(r.Bbox, p)) { hostRoomId = r.Id; hostBbox = r.Bbox; break; }
                 }
-                if (hostRoomHandle == null) continue;
+                if (hostRoomId == null) continue;
 
-                obj.Group3Spatial.RoomOrZoneNativeId = hostRoomHandle;
+                obj.Group3Spatial.RoomOrZoneNativeId = hostRoomId;
                 obj.Group8Quality.RoomOrigin = "spatial_inference";
 
                 string? label = null;
@@ -331,7 +393,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
                 foreach (var room in payload.Rooms)
                 {
-                    if (room.NativeId == hostRoomHandle && string.IsNullOrEmpty(room.RawName))
+                    if (room.NativeId == hostRoomId && string.IsNullOrEmpty(room.RawName))
                     {
                         room.RawName = label;
                         break;
@@ -361,6 +423,123 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             if (name.IndexOf("Visibility", StringComparison.OrdinalIgnoreCase) >= 0) return true;
             if (name.EndsWith("State", StringComparison.OrdinalIgnoreCase)) return true;
             return false;
+        }
+
+        // ── v0.3 Layer 2 top-level mirrors ──────────────────────────────────────────
+
+        // Group 13 — document-level xref summary
+        private static void PopulateTopLevelXrefReferences(Transaction tr, BlockTable bt, ExtractionPayload payload)
+        {
+            foreach (ObjectId bid in bt)
+            {
+                var btr = (BlockTableRecord)tr.GetObject(bid, OpenMode.ForRead);
+                if (!btr.IsFromExternalReference) continue;
+
+                var defKey = btr.Id.Handle.Value.ToString("X");
+                var count  = payload.Objects.Count(o => o.Group1Identity.DefinitionId == defKey);
+
+                payload.XrefReferences.Add(new XrefReferenceSignal
+                {
+                    XrefName          = btr.Name,
+                    XrefFileHash      = HashXrefPath(btr.PathName),
+                    XrefPathStatus    = btr.IsResolved ? "loaded" : "unresolved",
+                    ObjectCountInXref = count
+                });
+            }
+        }
+
+        // Group 15 — top-level dynamic_blocks mirror (reads what EnrichDynamicBlocks
+        // already pushed into existing_metadata["dynamic_block"])
+        private static void PopulateTopLevelDynamicBlocks(ExtractionPayload payload)
+        {
+            foreach (var obj in payload.Objects)
+            {
+                var meta = obj.Group6Metadata?.ExistingMetadata;
+                if (meta == null || !meta.TryGetValue("dynamic_block", out var dyn) || dyn == null) continue;
+
+                dyn.TryGetValue("block_name", out var blockName);
+                dyn.TryGetValue("visibility_state", out var visState);
+
+                var props = dyn
+                    .Where(kv => kv.Key != "block_name" && kv.Key != "visibility_state")
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+
+                payload.DynamicBlocks.Add(new DynamicBlockTopLevel
+                {
+                    NativeId             = obj.Group1Identity.NativeId,
+                    BlockDefinitionName  = blockName,
+                    ActiveVisibilityState = visState,
+                    DynamicProperties    = props.Count > 0 ? props : null
+                });
+            }
+        }
+
+        // Group 14 — extended per-layer properties
+        private static void PopulateExtendedLayerProperties(Transaction tr, Database db, ExtractionPayload payload)
+        {
+            var lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+            foreach (ObjectId lid in lt)
+            {
+                var lrec = (LayerTableRecord)tr.GetObject(lid, OpenMode.ForRead);
+                var c = lrec.Color;
+                var basic = payload.LayersOrTags.FirstOrDefault(l =>
+                    string.Equals(l.Name, lrec.Name, StringComparison.OrdinalIgnoreCase));
+
+                // ACI colors carry zeros in Color.Red/Green/Blue (those fields hold *explicit*
+                // RGB only). ColorValue is the System.Drawing.Color the SDK already resolved
+                // via the standard ACI palette — works uniformly for ACI, true-color, book color.
+                var rv = c.ColorValue;
+                payload.LayerProperties.Add(new LayerPropertiesSignal
+                {
+                    Name        = lrec.Name,
+                    ColorIndex  = c.ColorIndex,
+                    ColorRgb    = new RgbColor { R = rv.R, G = rv.G, B = rv.B },
+                    Linetype    = basic?.Linetype,
+                    Lineweight  = (int)lrec.LineWeight,
+                    Frozen      = lrec.IsFrozen,
+                    Locked      = lrec.IsLocked,
+                    Visible     = !lrec.IsOff,
+                    ObjectCount = basic?.ObjectCount ?? 0,
+                    IsXrefLayer = lrec.Name.Contains("|")
+                });
+            }
+        }
+
+        private static void PopulateEntitySourceSummary(ExtractionPayload payload)
+        {
+            var xrefObjects = payload.Objects.Where(o => o.Group7Source.IsXrefOrigin == true).ToList();
+            var xrefSources = xrefObjects
+                .Select(o => o.Group7Source.XrefFileName)
+                .Where(s => !string.IsNullOrEmpty(s))
+                .Select(s => s!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            payload.EntitySourceSummary = new EntitySourceSummary
+            {
+                NativeCount = payload.Objects.Count - xrefObjects.Count,
+                XrefCount   = xrefObjects.Count,
+                XrefSources = xrefSources
+            };
+        }
+
+        private static void ComputeExtractionTier(ExtractionPayload payload)
+        {
+            var layer2 = new List<string>();
+            if (payload.Annotations.Count       > 0) layer2.Add("annotations");
+            if (payload.Dimensions.Count        > 0) layer2.Add("dimensions");
+            if (payload.Hatches.Count           > 0) layer2.Add("hatches");
+            if (payload.XrefReferences.Count    > 0) layer2.Add("xref_references");
+            if (payload.DynamicBlocks.Count     > 0) layer2.Add("dynamic_blocks");
+            if (payload.LayerProperties.Count   > 0) layer2.Add("layer_properties");
+            if (payload.CadTables.Count         > 0) layer2.Add("cad_tables");
+
+            payload.Summary.Layer2GroupsIncluded = layer2;
+            if (layer2.Count > 0)
+            {
+                payload.ExtractionTier         = "layer_2";
+                payload.Summary.ExtractionTier = "layer_2";
+            }
         }
     }
 }

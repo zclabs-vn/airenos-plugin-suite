@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -17,6 +18,19 @@ namespace AirenoOS.BricsCAD.Plugin.Communicator
     /// </summary>
     internal static class HttpSender
     {
+        static HttpSender()
+        {
+            // BricsCAD V26 runs on .NET 8 where TLS defaults are fine — but a static ctor
+            // here keeps parity with the AutoCAD plugin's net48 path and guards against
+            // any future downgrade. Safe no-op on .NET 8.
+            try
+            {
+                ServicePointManager.SecurityProtocol |=
+                    SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
+            }
+            catch { }
+        }
+
         private static readonly HttpClient Client = new()
         {
             Timeout = TimeSpan.FromSeconds(30)
@@ -72,11 +86,8 @@ namespace AirenoOS.BricsCAD.Plugin.Communicator
                 return;
             }
 
-            // Echo bearer in body per Canonical Schema v0.2 envelope spec.
-            // The HTTP Authorization header still carries it for actual auth;
-            // body duplication is what the spec example shows.
-            payload.Authentication = new Authentication { BearerToken = token };
-
+            // v0.3 + Brian feedback (2026-06-05) item #3: the bearer token travels in
+            // the HTTP Authorization header ONLY. Never duplicate it into the JSON body.
             var json = JsonSerializer.Serialize(payload, JsonOpts);
 
             // First attempt + one retry on transient failure
@@ -85,6 +96,48 @@ namespace AirenoOS.BricsCAD.Plugin.Communicator
             if (await TrySend(endpoint, token, json)) return;
 
             PersistOffline(payload, reason: "http_failed");
+        }
+
+        /// <summary>
+        /// Blocking POST with a tight timeout — used only from the Application.BeginQuit
+        /// handler (Brian feedback #5: session-end sync). The async PostAsync path can't
+        /// be used at shutdown because BricsCAD tears down the runtime before fire-and-forget
+        /// tasks can complete. On any failure the payload is persisted to the offline queue
+        /// with a 'session_end_*' reason suffix so the next session retries it.
+        /// </summary>
+        public static void PostSync(Database db, ExtractionPayload payload, int timeoutMs)
+        {
+            string endpoint, token;
+            try
+            {
+                (endpoint, token) = ConnectionConfig.Load(db);
+            }
+            catch
+            {
+                PersistOffline(payload, reason: "session_end_no_config");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(token))
+            {
+                PersistOffline(payload, reason: "session_end_no_endpoint_or_token");
+                return;
+            }
+
+            string json;
+            try { json = JsonSerializer.Serialize(payload, JsonOpts); }
+            catch { PersistOffline(payload, reason: "session_end_serialize_failed"); return; }
+
+            try
+            {
+                var task = TrySend(endpoint, token, json);
+                if (task.Wait(timeoutMs) && task.Result) return;
+                PersistOffline(payload, reason: "session_end_http_failed");
+            }
+            catch
+            {
+                PersistOffline(payload, reason: "session_end_threw");
+            }
         }
 
         /// <summary>
@@ -124,12 +177,28 @@ namespace AirenoOS.BricsCAD.Plugin.Communicator
                 req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
                 using var resp = await Client.SendAsync(req).ConfigureAwait(false);
-                return resp.IsSuccessStatusCode;
-            }
-            catch
-            {
+                if (resp.IsSuccessStatusCode) return true;
+                string body = "";
+                try { body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false); } catch { }
+                LogError($"POST {endpoint} → {(int)resp.StatusCode} {resp.ReasonPhrase}\n{body}");
                 return false;
             }
+            catch (Exception ex)
+            {
+                LogError($"POST {endpoint} threw: {ex.GetType().Name}: {ex.Message}\n{ex.InnerException?.Message}");
+                return false;
+            }
+        }
+
+        private static void LogError(string message)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(PendingDir)!);
+                var path = Path.Combine(Path.GetDirectoryName(PendingDir)!, "last_error.txt");
+                File.WriteAllText(path, $"[{DateTime.UtcNow:O}]\n{message}");
+            }
+            catch { }
         }
 
         private static void PersistOffline(ExtractionPayload payload, string reason)

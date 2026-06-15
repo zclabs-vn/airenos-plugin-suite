@@ -5,7 +5,7 @@ namespace AirenoOS.BricsCAD.Plugin
 {
     /// <summary>
     /// XDATA helpers for the AIRENO registered application.
-    /// XDATA layout written by extraction / writeback:
+    /// XDATA layout written by extraction / writeback (v0.3, 2026-06):
     ///   [0] RegAppName     = "AIRENO"
     ///   [1] AsciiString    = native_id (UUID, plugin-generated, stable across purge)
     ///   [2] AsciiString    = aireno_backpack_id (empty until confirmed)
@@ -13,6 +13,9 @@ namespace AirenoOS.BricsCAD.Plugin
     ///   [4] AsciiString    = confirmed_label
     ///   [5] AsciiString    = confirmed_room_id
     ///   [6] AsciiString    = last_synced (ISO-8601 UTC)
+    ///   [7] AsciiString    = aireno_previous_label  (NEW v0.3 — captured before a
+    ///                                                confirmed-label rename so Backpack
+    ///                                                can preserve label history)
     /// </summary>
     internal static class XdataHelper
     {
@@ -71,7 +74,8 @@ namespace AirenoOS.BricsCAD.Plugin
             string identityState = "raw",
             string confirmedLabel = "",
             string confirmedRoomId = "",
-            string? lastSynced = null)
+            string? lastSynced = null,
+            string airenoPreviousLabel = "")
         {
             var ts = lastSynced ?? DateTime.UtcNow.ToString("o");
             entity.XData = new ResultBuffer(
@@ -81,7 +85,8 @@ namespace AirenoOS.BricsCAD.Plugin
                 new TypedValue((int)DxfCode.ExtendedDataAsciiString,   identityState),
                 new TypedValue((int)DxfCode.ExtendedDataAsciiString,   confirmedLabel),
                 new TypedValue((int)DxfCode.ExtendedDataAsciiString,   confirmedRoomId),
-                new TypedValue((int)DxfCode.ExtendedDataAsciiString,   ts)
+                new TypedValue((int)DxfCode.ExtendedDataAsciiString,   ts),
+                new TypedValue((int)DxfCode.ExtendedDataAsciiString,   airenoPreviousLabel)
             );
         }
     }

@@ -53,22 +53,45 @@ namespace AirenoOS.BricsCAD.Plugin
 
         private static void ApplyToEntity(Transaction tr, Database db, WritebackItem item)
         {
-            // Register AIRENO app name if needed
             XdataHelper.EnsureAppRegistered(db, tr);
 
             var entity = tr.GetObject(item.EntityId, OpenMode.ForWrite) as Entity;
             if (entity == null) return;
 
-            var xdata = new ResultBuffer(
-                new TypedValue((int)DxfCode.ExtendedDataRegAppName, XdataHelper.AppName),
-                new TypedValue((int)DxfCode.ExtendedDataAsciiString, item.AirenoBackpackId ?? string.Empty),
-                new TypedValue((int)DxfCode.ExtendedDataAsciiString, "confirmed"),
-                new TypedValue((int)DxfCode.ExtendedDataAsciiString, item.ConfirmedLabel ?? string.Empty),
-                new TypedValue((int)DxfCode.ExtendedDataAsciiString, item.ConfirmedRoomId ?? string.Empty),
-                new TypedValue((int)DxfCode.ExtendedDataAsciiString, DateTime.UtcNow.ToString("o"))
-            );
+            // Preserve existing native_id (UUID at slot 0) — the previous inline ResultBuffer
+            // was writing the bearer slot as backpack_id and silently dropping the UUID, which
+            // broke object identity after every writeback. Route through WriteFreshXdata so
+            // the slot layout matches the extractor's reader.
+            var existingUuid = XdataHelper.ReadField(entity, fieldIndex: 0) ?? Guid.NewGuid().ToString();
 
-            entity.XData = xdata;
+            // Brian feedback #8 (2026-06-05) — preserve the label the user saw before this
+            // writeback so the audit trail isn't erased on rename. Subsequent writebacks fall
+            // back to the prior confirmed_label (slot 3); the first writeback ever falls back
+            // to the block definition name (or entity type for non-block entities).
+            var previousLabel = XdataHelper.ReadField(entity, fieldIndex: 3);
+            if (string.IsNullOrEmpty(previousLabel))
+            {
+                if (entity is BlockReference br)
+                {
+                    var btr = (BlockTableRecord)tr.GetObject(br.BlockTableRecord, OpenMode.ForRead);
+                    previousLabel = btr.Name;
+                }
+                else
+                {
+                    previousLabel = entity.GetType().Name;
+                }
+            }
+
+            XdataHelper.WriteFreshXdata(
+                entity,
+                nativeId:            existingUuid,
+                airenoBackpackId:    item.AirenoBackpackId ?? string.Empty,
+                identityState:       "confirmed",
+                confirmedLabel:      item.ConfirmedLabel ?? string.Empty,
+                confirmedRoomId:     item.ConfirmedRoomId ?? string.Empty,
+                lastSynced:          DateTime.UtcNow.ToString("o"),
+                airenoPreviousLabel: previousLabel ?? string.Empty
+            );
         }
     }
 }

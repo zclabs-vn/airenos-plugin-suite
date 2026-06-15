@@ -4,30 +4,25 @@ using System.Text.Json.Serialization;
 namespace AirenoOS.BricsCAD.Plugin.Schema
 {
     /// <summary>
-    /// Top-level envelope — exactly matches Canonical Plugin Schema v0.2 "Full Payload Envelope".
-    /// Document-level Group 7 fields (source_software, plugin_version, extracted_at, etc.)
-    /// live inside each object's `group_7_source` per spec — NOT at top-level.
-    /// `annotations`, `dimensions`, `hatches` are Layer 2 CAD extensions confirmed by Brian
-    /// in Round 2 (out of the base envelope but within agreed scope).
+    /// Top-level envelope — Canonical Plugin Schema v0.3 (Developer reference, May 2026).
+    /// Mirror of the AutoCAD plugin envelope. See AutoCAD ExtractionPayload.cs for the
+    /// full rationale (Brian feedback item #3 removes the body authentication block; the
+    /// bearer token travels in the HTTP Authorization header only).
     /// </summary>
     internal class ExtractionPayload
     {
         [JsonPropertyName("aireno_schema_version")]
-        public string SchemaVersion { get; set; } = "0.2";
+        public string SchemaVersion { get; set; } = "0.3";
 
         [JsonPropertyName("payload_type")]
         public string PayloadType { get; set; } = "extraction";
 
+        [JsonPropertyName("extraction_tier")]
+        public string ExtractionTier { get; set; } = "layer_1";
+
         [JsonPropertyName("project_id")]
         public string? ProjectId { get; set; }
 
-        [JsonPropertyName("authentication")]
-        public Authentication? Authentication { get; set; }
-
-        /// <summary>
-        /// Per spec note "same as Group 7 field" — top-level convenience duplicate
-        /// of objects[].group_7_source.document_project_token.
-        /// </summary>
         [JsonPropertyName("document_project_token")]
         public string DocumentProjectToken { get; set; } = string.Empty;
 
@@ -37,10 +32,20 @@ namespace AirenoOS.BricsCAD.Plugin.Schema
         [JsonPropertyName("rooms")]
         public List<RoomSignal> Rooms { get; set; } = new List<RoomSignal>();
 
+        [JsonPropertyName("levels")]
+        public List<LevelSignal> Levels { get; set; } = new List<LevelSignal>();
+
         [JsonPropertyName("layers_or_tags")]
         public List<LayerSignal> LayersOrTags { get; set; } = new List<LayerSignal>();
 
-        // ── Layer 2 CAD extensions (Brian Round 2 — not in base envelope but in scope) ──
+        // ── Layer 2 extended groups (v0.3 Developer doc Groups 9–15) ───────────────────
+
+        [JsonPropertyName("layer_properties")]
+        public List<LayerPropertiesSignal> LayerProperties { get; set; } = new List<LayerPropertiesSignal>();
+
+        [JsonPropertyName("cad_tables")]
+        public List<CadTableSignal> CadTables { get; set; } = new List<CadTableSignal>();
+
         [JsonPropertyName("annotations")]
         public List<AnnotationSignal> Annotations { get; set; } = new List<AnnotationSignal>();
 
@@ -50,17 +55,28 @@ namespace AirenoOS.BricsCAD.Plugin.Schema
         [JsonPropertyName("hatches")]
         public List<HatchSignal> Hatches { get; set; } = new List<HatchSignal>();
 
+        [JsonPropertyName("xref_references")]
+        public List<XrefReferenceSignal> XrefReferences { get; set; } = new List<XrefReferenceSignal>();
+
+        [JsonPropertyName("entity_source_summary")]
+        public EntitySourceSummary? EntitySourceSummary { get; set; }
+
+        [JsonPropertyName("dynamic_blocks")]
+        public List<DynamicBlockTopLevel> DynamicBlocks { get; set; } = new List<DynamicBlockTopLevel>();
+
+        // ── BIM-only top-level fields — emitted empty by 2D CAD plugins ────────────────
+
+        [JsonPropertyName("bim_schedules")]
+        public List<object> BimSchedules { get; set; } = new List<object>();
+
+        [JsonPropertyName("model_health")]
+        public Dictionary<string, object>? ModelHealth { get; set; }
+
         [JsonPropertyName("unresolved_objects")]
         public List<UnresolvedObjectSignal> UnresolvedObjects { get; set; } = new List<UnresolvedObjectSignal>();
 
         [JsonPropertyName("extraction_summary")]
         public ExtractionSummary Summary { get; set; } = new ExtractionSummary();
-    }
-
-    internal class Authentication
-    {
-        [JsonPropertyName("bearer_token")]
-        public string? BearerToken { get; set; }
     }
 
     internal class ExtractionSummary
@@ -72,5 +88,14 @@ namespace AirenoOS.BricsCAD.Plugin.Schema
         [JsonPropertyName("high_quality_count")]    public int HighQualityCount    { get; set; }
         [JsonPropertyName("medium_quality_count")]  public int MediumQualityCount  { get; set; }
         [JsonPropertyName("low_quality_count")]     public int LowQualityCount     { get; set; }
+
+        [JsonPropertyName("extraction_tier")]
+        public string ExtractionTier { get; set; } = "layer_1";
+
+        [JsonPropertyName("layer_2_groups_included")]
+        public List<string> Layer2GroupsIncluded { get; set; } = new List<string>();
+
+        [JsonPropertyName("extraction_duration_ms")]
+        public long ExtractionDurationMs { get; set; }
     }
 }

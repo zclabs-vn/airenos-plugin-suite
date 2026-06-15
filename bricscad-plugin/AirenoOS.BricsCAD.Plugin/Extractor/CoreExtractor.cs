@@ -17,6 +17,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
     {
         public static ExtractionPayload Extract(Document doc, string trigger = "on_save")
         {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var db = doc.Database;
 
             // Document-level Group 7 context — copied into every object's group_7_source per envelope spec.
@@ -49,6 +50,14 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 tr.Abort();
                 throw;
             }
+
+            // v0.3 — ExtendedExtractor upgrades to layer_2 if any Layer 2 array is populated.
+            payload.ExtractionTier         = "layer_1";
+            payload.Summary.ExtractionTier = "layer_1";
+
+            stopwatch.Stop();
+            // Ceil from TotalMilliseconds so sub-ms extractions surface as 1ms instead of 0.
+            payload.Summary.ExtractionDurationMs = (long)Math.Ceiling(stopwatch.Elapsed.TotalMilliseconds);
             return payload;
         }
 
@@ -124,7 +133,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             SourceSoftware        = "bricscad",
             SourceSoftwareVersion = ctx.SourceSoftwareVersion,
             SourceSoftwareType    = "2d_cad",
-            PluginVersion         = "1.0.0",
+            PluginVersion         = "1.0.11",
             FileNameHash          = ctx.FileNameHash,
             FileNameDisplay       = ctx.FileNameDisplay,
             DocumentProjectToken  = ctx.DocumentProjectToken,
@@ -150,6 +159,8 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 var backpackId = XdataHelper.ReadField(br, fieldIndex: 1);
                 var identityState = XdataHelper.ReadField(br, fieldIndex: 2) ?? "raw";
                 var confirmedLabel = XdataHelper.ReadField(br, fieldIndex: 3);
+                // Brian #8: slot 6 carries the label the user saw before the last writeback.
+                var previousLabel = XdataHelper.ReadField(br, fieldIndex: 6);
 
                 var btr = (BlockTableRecord)tr.GetObject(br.BlockTableRecord, OpenMode.ForRead);
 
@@ -162,13 +173,15 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                         NativeId          = string.IsNullOrEmpty(nativeId) ? null : nativeId,
                         NativeIdType      = "xdata_uuid",
                         NativeIdStability = "stable",
-                        AirenoBackpackId  = string.IsNullOrEmpty(backpackId) ? null : backpackId,
                         IdentityState     = identityState,
                         LinkState         = string.IsNullOrEmpty(backpackId) ? "unlinked" : "linked",
                         IsDefinition      = false,
                         DefinitionId      = btr.Id.Handle.Value.ToString("X"),
                         InstanceId        = br.Handle.Value.ToString("X")
                     },
+                    AirenoosRef = string.IsNullOrEmpty(backpackId)
+                        ? null
+                        : new AirenoosRef { BackpackId = backpackId },
                     Group2Naming = new Group2Naming
                     {
                         VisibleLabel          = string.IsNullOrEmpty(confirmedLabel) ? btr.Name : confirmedLabel,
@@ -179,7 +192,8 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                         // We only extract ModelSpace today — fixed string. When layout/paperspace
                         // extraction is added, switch to LayoutManager.Current.CurrentLayout.
                         SceneOrViewName       = "Model",
-                        NamingOrigin          = "block_definition"
+                        NamingOrigin          = "block_definition",
+                        AirenoPreviousLabel   = string.IsNullOrEmpty(previousLabel) ? null : previousLabel
                     },
                     Group3Spatial = new Group3Spatial
                     {
@@ -320,9 +334,12 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 var pl = tr.GetObject(id, OpenMode.ForRead) as Polyline;
                 if (pl == null || !pl.Closed) continue;
 
+                // Brian #7: prefer AIRENO XDATA UUID (stable across save/copy/purge);
+                // fall back to the Teigha handle until AIRENO_EXTRACT has written it.
+                var roomXdataId = XdataHelper.ReadField(pl, 0);
                 payload.Rooms.Add(new RoomSignal
                 {
-                    NativeId          = pl.Handle.Value.ToString("X"),
+                    NativeId          = !string.IsNullOrEmpty(roomXdataId) ? roomXdataId : pl.Handle.Value.ToString("X"),
                     RawName           = null,            // 2D CAD: no native room name
                     LayerOrTag        = pl.Layer,
                     BoundaryArea      = SafeArea(pl),
@@ -333,7 +350,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                     ZoneNumber        = null,
                     ZoneCategory      = null,
                     ContainedObjectNativeIds = null,     // requires spatial-containment pass (Layer 2)
-                    AirenoBackpackId  = null
+                    AirenoosRef       = null             // rooms have no XDATA backpack_id readback yet
                 });
             }
         }
