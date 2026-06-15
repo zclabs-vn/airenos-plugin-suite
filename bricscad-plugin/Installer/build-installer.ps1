@@ -74,7 +74,10 @@ if (-not (Test-Path $MsiOut)) {
     throw "MSI was not produced at $MsiOut"
 }
 
-Write-Host "[3/3] Cleaning staging..." -ForegroundColor Cyan
+Write-Host "[3/4] Patching ControlCondition rows for VersionSelectDlg..." -ForegroundColor Cyan
+& "$InstallerDir\post-build.ps1" -MsiPath $MsiOut
+
+Write-Host "[4/4] Cleaning staging..." -ForegroundColor Cyan
 Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
 
 $size = [math]::Round((Get-Item $MsiOut).Length / 1KB, 1)

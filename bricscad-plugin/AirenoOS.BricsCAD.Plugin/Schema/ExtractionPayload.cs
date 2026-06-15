@@ -77,6 +77,24 @@ namespace AirenoOS.BricsCAD.Plugin.Schema
 
         [JsonPropertyName("extraction_summary")]
         public ExtractionSummary Summary { get; set; } = new ExtractionSummary();
+
+        // Brian #11 — BricsCAD-specific host environment probe. Lets the MCP server know
+        // whether the host can fulfil BIM-tagged requests (BIM module licensed) without
+        // having to wait for a parse error downstream.
+        [JsonPropertyName("host_environment")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public HostEnvironment? HostEnvironment { get; set; }
+    }
+
+    /// <summary>
+    /// Snapshot of the runtime host (BricsCAD edition + licensed modules) at extraction
+    /// time. Emitted only by the BricsCAD plugin — AutoCAD plugin leaves this absent.
+    /// </summary>
+    internal class HostEnvironment
+    {
+        [JsonPropertyName("product_name")]        public string? ProductName       { get; set; }
+        [JsonPropertyName("product_variant")]     public string? ProductVariant    { get; set; }
+        [JsonPropertyName("bim_module_available")] public bool   BimModuleAvailable { get; set; }
     }
 
     internal class ExtractionSummary

@@ -5,14 +5,17 @@
   Build with:
     wix build AirenoOS.BricsCAD.Installer.wxs `
       -d PluginDll=..\AirenoOS.BricsCAD.Plugin\bin\Release\net8.0-windows\AirenoOS.BricsCAD.Plugin.dll `
-      -o ..\dist\AirenoOS.BricsCAD.Plugin-1.0.0.msi
+      -ext WixToolset.UI.wixext `
+      -o ..\dist\AirenoOS.BricsCAD.Plugin.msi
 
-  Install layout:
-    %ProgramFiles%\Bricsys\ApplicationPlugins\AirenoOS.BricsCAD.bundle\
+  After wix build, post-build.ps1 patches the ControlCondition table to enable/
+  disable the V25 and V26 checkboxes based on the detection properties — WiX 5
+  dropped that syntactic sugar so we inject the rows via WindowsInstaller COM.
+
+  Install layout (per-user, no admin):
+    %APPDATA%\Bricsys\ApplicationPlugins\AirenoOS.BricsCAD.bundle\
       PackageContents.xml
-      Contents\
-        Windows\
-          AirenoOS.BricsCAD.Plugin.dll
+      Contents\Windows\AirenoOS.BricsCAD.Plugin.dll
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
@@ -20,14 +23,14 @@
   <Package
       Name="AirenoOS BricsCAD Plugin"
       Manufacturer="ZCLabs"
-      Version="1.0.11.0"
+      Version="1.0.13.0"
       UpgradeCode="C3D1A5A2-AFE6-4F1A-9B0E-A1A2A3A4A5A6"
-      Scope="perMachine"
+      Scope="perUser"
       Compressed="yes"
       InstallerVersion="500">
 
     <SummaryInformation
-        Description="AirenoOS metadata sync plugin for BricsCAD V26"
+        Description="AirenoOS metadata sync plugin for BricsCAD V25 and V26"
         Keywords="AirenoOS;BricsCAD;Plugin;MCP" />
 
     <!-- AllowSameVersionUpgrades: each wix build generates a fresh ProductCode, so a
@@ -44,36 +47,47 @@
     <Property Id="ARPURLINFOABOUT" Value="https://zclabs.vn" />
 
     <!-- ───────────────────────────────────────────────────────────────────────
-         BricsCAD detection
-         FileSearch probes for bricscad.exe under the standard install path.
-         If found, BRICSCAD_FOUND is set to the full path (truthy in conditions).
+         BricsCAD detection — Brian #10
+         Probe both V25 and V26 install paths so a single MSI works against either
+         release. BRICSCAD_VXX_FOUND is set to the bricscad.exe path when found.
          ─────────────────────────────────────────────────────────────────────── -->
-    <Property Id="BRICSCAD_FOUND" Secure="yes">
+    <Property Id="BRICSCAD_V25_FOUND" Secure="yes">
+      <DirectorySearch Id="BricscadV25PathSearch" Path="[ProgramFiles64Folder]Bricsys\BricsCAD V25 en_US" Depth="0">
+        <FileSearch Id="BricscadV25ExeSearch" Name="bricscad.exe" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="BRICSCAD_V26_FOUND" Secure="yes">
       <DirectorySearch Id="BricscadV26PathSearch" Path="[ProgramFiles64Folder]Bricsys\BricsCAD V26 en_US" Depth="0">
         <FileSearch Id="BricscadV26ExeSearch" Name="bricscad.exe" />
       </DirectorySearch>
     </Property>
 
-    <!-- Refuse to install if BricsCAD is not detected. -->
-    <Launch Condition="BRICSCAD_FOUND"
-            Message="BricsCAD V26 was not detected (expected at &quot;C:\Program Files\Bricsys\BricsCAD V26 en_US&quot;). Install BricsCAD first, then re-run this installer." />
+    <!-- Checkbox-bound install flags. Empty = unchecked, "1" = checked.
+         Default unchecked; SetProperty below ticks whichever versions were detected. -->
+    <Property Id="INSTALL_V25" Secure="yes" />
+    <Property Id="INSTALL_V26" Secure="yes" />
 
-    <!-- Wizard: Welcome -> License (EULA) -> Progress -> Finish -->
-    <ui:WixUI Id="WixUI_Minimal" />
-    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <SetProperty Id="INSTALL_V25" Value="1" After="AppSearch" Condition="BRICSCAD_V25_FOUND" Sequence="ui" />
+    <SetProperty Id="INSTALL_V26" Value="1" After="AppSearch" Condition="BRICSCAD_V26_FOUND" Sequence="ui" />
 
-    <Feature Id="Main" Title="AirenoOS BricsCAD Plugin" Level="1" Display="expand">
-      <ComponentGroupRef Id="BundleFiles" />
-    </Feature>
-  </Package>
+    <!-- Status labels next to each checkbox — flips to "(detected)" when the
+         corresponding bricscad.exe was found at AppSearch time. -->
+    <Property Id="STATUS_V25" Value="(not installed)" />
+    <Property Id="STATUS_V26" Value="(not installed)" />
+    <SetProperty Id="STATUS_V25" Value="(detected)" After="AppSearch" Condition="BRICSCAD_V25_FOUND" Sequence="ui" />
+    <SetProperty Id="STATUS_V26" Value="(detected)" After="AppSearch" Condition="BRICSCAD_V26_FOUND" Sequence="ui" />
 
-  <Fragment>
-    <!--
-      Plugin must live under Bricsys\ApplicationPlugins so BricsCAD auto-loads it.
-      Using StandardDirectory makes WiX target the correct ProgramFiles64Folder
-      regardless of host bitness.
-    -->
-    <StandardDirectory Id="ProgramFiles64Folder">
+    <!-- Refuse to launch if zero BricsCAD versions are present on the machine. -->
+    <Launch Condition="BRICSCAD_V25_FOUND OR BRICSCAD_V26_FOUND"
+            Message="Neither BricsCAD V25 nor V26 was detected in &quot;C:\Program Files\Bricsys\&quot;. Install BricsCAD first, then re-run this installer." />
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         Install layout — single bundle deploys to %APPDATA% per Brian #9.
+         The same .dll is binary-compatible with BricsCAD V25 and V26 (both
+         expose the same Bricscad.* + Teigha.* surface), so only one Contents/
+         subfolder is shipped regardless of which checkboxes are ticked.
+         ─────────────────────────────────────────────────────────────────────── -->
+    <StandardDirectory Id="AppDataFolder">
       <Directory Id="BricsysFolder" Name="Bricsys">
         <Directory Id="AppPluginsFolder" Name="ApplicationPlugins">
           <Directory Id="BundleFolder" Name="AirenoOS.BricsCAD.bundle">
@@ -84,26 +98,104 @@
         </Directory>
       </Directory>
     </StandardDirectory>
-  </Fragment>
+
+    <!-- Single feature — gated by "at least one version ticked". Feature.Level=0
+         hides+skips the install when both checkboxes are clear, which lets the
+         user explicitly opt out (e.g. uninstalling before re-installing with
+         different version selection). -->
+    <Feature Id="Main" Title="AirenoOS BricsCAD Plugin" Level="1" Display="expand">
+      <Level Value="0" Condition="NOT INSTALL_V25 AND NOT INSTALL_V26" />
+      <ComponentGroupRef Id="BundleFiles" />
+    </Feature>
+
+    <!-- ───────────────────────────────────────────────────────────────────────
+         Custom UI: insert VersionSelectDlg into WixUI_FeatureTree's flow.
+         Wizard order: Welcome → License → SelectVersions → Verify → Progress → Finish
+         ─────────────────────────────────────────────────────────────────────── -->
+    <ui:WixUI Id="WixUI_FeatureTree" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <UI>
+      <Dialog Id="VersionSelectDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+                 TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}Select BricsCAD Versions" />
+        <Control Id="Subtitle" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="Choose which BricsCAD versions to install the plugin for." />
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="LicenseAgreementDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+
+        <!-- ── BricsCAD V25 ───────────────────────────────────────── -->
+        <Control Id="CbV25" Type="CheckBox" X="30" Y="80" Width="200" Height="17"
+                 Property="INSTALL_V25" CheckBoxValue="1" Text="BricsCAD &amp;V25" />
+        <Control Id="StV25" Type="Text" X="240" Y="81" Width="120" Height="15" Transparent="yes"
+                 Text="[STATUS_V25]" />
+
+        <!-- ── BricsCAD V26 ───────────────────────────────────────── -->
+        <Control Id="CbV26" Type="CheckBox" X="30" Y="120" Width="200" Height="17"
+                 Property="INSTALL_V26" CheckBoxValue="1" Text="BricsCAD V2&amp;6" />
+        <Control Id="StV26" Type="Text" X="240" Y="121" Width="120" Height="15" Transparent="yes"
+                 Text="[STATUS_V26]" />
+
+        <Control Id="Hint" Type="Text" X="30" Y="170" Width="320" Height="40" Transparent="yes" NoPrefix="yes"
+                 Text="Versions marked (detected) are pre-selected. The plugin bundle is installed once to %APPDATA% and BricsCAD auto-loads it on startup — both ticked just keeps the bundle enabled for both editions." />
+      </Dialog>
+
+      <!-- Wire VersionSelectDlg into the flow: License → SelectVersions → Verify -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="VersionSelectDlg"
+               Order="3" Condition="LicenseAccepted = &quot;1&quot;" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="VersionSelectDlg" Order="3" />
+    </UI>
+  </Package>
 
   <Fragment>
     <ComponentGroup Id="BundleFiles">
-      <!-- PackageContents.xml at the bundle root — read by BricsCAD on startup -->
-      <Component Id="C_PackageContents" Directory="BundleFolder">
+      <!-- PackageContents.xml at the bundle root — read by BricsCAD on startup.
+           Per-user components must declare an HKCU registry KeyPath (ICE57), so the
+           file itself is no longer KeyPath. -->
+      <Component Id="C_PackageContents" Directory="BundleFolder"
+                 Guid="A1B2C3D4-1111-1111-A1B2-A1A1A1A1A1A1">
+        <RegistryValue Root="HKCU"
+                       Key="Software\ZCLabs\AirenoOS.BricsCAD.Plugin"
+                       Name="PackageContents"
+                       Type="string"
+                       Value="1.0.13"
+                       KeyPath="yes" />
         <File
             Id="F_PackageContents"
             Name="PackageContents.xml"
-            Source="PackageContents.xml"
-            KeyPath="yes" />
+            Source="PackageContents.xml" />
+        <RemoveFolder Id="RemoveBundleRoot"   On="uninstall" />
+        <RemoveFolder Id="RemoveAppPlugins"   Directory="AppPluginsFolder" On="uninstall" />
+        <RemoveFolder Id="RemoveBricsysRoot"  Directory="BricsysFolder"    On="uninstall" />
+        <RemoveFolder Id="RemoveContentsDir"  Directory="ContentsFolder"   On="uninstall" />
+        <RemoveFolder Id="RemoveBundleWinDir" Directory="BundleWinSubFolder" On="uninstall" />
       </Component>
 
       <!-- The actual plugin DLL -->
-      <Component Id="C_PluginDll" Directory="BundleWinSubFolder">
+      <Component Id="C_PluginDll" Directory="BundleWinSubFolder"
+                 Guid="A1B2C3D4-2222-2222-A2B2-A2A2A2A2A2A2">
+        <RegistryValue Root="HKCU"
+                       Key="Software\ZCLabs\AirenoOS.BricsCAD.Plugin"
+                       Name="PluginDll"
+                       Type="string"
+                       Value="1.0.13"
+                       KeyPath="yes" />
         <File
             Id="F_PluginDll"
             Name="AirenoOS.BricsCAD.Plugin.dll"
-            Source="$(var.PluginDll)"
-            KeyPath="yes" />
+            Source="$(var.PluginDll)" />
       </Component>
     </ComponentGroup>
   </Fragment>

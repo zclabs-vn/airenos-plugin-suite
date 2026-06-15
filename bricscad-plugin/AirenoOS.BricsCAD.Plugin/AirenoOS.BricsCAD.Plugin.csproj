@@ -4,13 +4,21 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <AssemblyName>AirenoOS.BricsCAD.Plugin</AssemblyName>
     <RootNamespace>AirenoOS.BricsCAD.Plugin</RootNamespace>
-    <Version>1.0.11</Version>
+    <Version>1.0.13</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <!-- BricsCAD loads the DLL — do not generate an exe -->
     <Optimize>true</Optimize>
+
+    <!-- Brian #10 — build against whichever BricsCAD edition is available on this
+         machine. Try V26 first (current preferred), fall back to V25. The compiled
+         DLL is binary-compatible with both because both expose the same Bricscad.*
+         and Teigha.* surface used here. Override BricsCADDir on the command line to
+         force a specific path (CI servers etc). -->
+    <BricsCADDir Condition="'$(BricsCADDir)' == '' AND Exists('C:\Program Files\Bricsys\BricsCAD V26 en_US\BrxMgd.dll')">C:\Program Files\Bricsys\BricsCAD V26 en_US</BricsCADDir>
+    <BricsCADDir Condition="'$(BricsCADDir)' == '' AND Exists('C:\Program Files\Bricsys\BricsCAD V25 en_US\BrxMgd.dll')">C:\Program Files\Bricsys\BricsCAD V25 en_US</BricsCADDir>
     <BricsCADDir Condition="'$(BricsCADDir)' == ''">C:\Program Files\Bricsys\BricsCAD V26 en_US</BricsCADDir>
   </PropertyGroup>
 

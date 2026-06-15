@@ -1,3 +1,4 @@
+using System;
 using Bricscad.ApplicationServices;
 using Teigha.DatabaseServices;
 using Teigha.Geometry;
@@ -55,10 +56,43 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             payload.ExtractionTier         = "layer_1";
             payload.Summary.ExtractionTier = "layer_1";
 
+            // Brian #11 — runtime probe for BIM module so the MCP server knows whether
+            // BIM-tagged work can be served by this host (Lite/Pro vs BIM/Ultimate).
+            payload.HostEnvironment = ProbeHostEnvironment();
+
             stopwatch.Stop();
             // Ceil from TotalMilliseconds so sub-ms extractions surface as 1ms instead of 0.
             payload.Summary.ExtractionDurationMs = (long)Math.Ceiling(stopwatch.Elapsed.TotalMilliseconds);
             return payload;
+        }
+
+        /// <summary>
+        /// Brian #11 — best-effort probe of the BricsCAD host. SystemVariable names changed
+        /// across versions (V24/V25/V26), so every read is wrapped: an unknown name just
+        /// leaves that field null/false instead of failing the whole extraction.
+        ///   BIMLIC       → "1" when BIM features are licensed and loaded
+        ///   PRODUCT      → human-readable product family ("BricsCAD")
+        ///   BCADPRODUCT  → product variant ("Lite", "Pro", "BIM", "Mechanical", "Ultimate")
+        /// </summary>
+        private static HostEnvironment ProbeHostEnvironment()
+        {
+            var env = new HostEnvironment();
+            try { env.ProductName    = Application.GetSystemVariable("PRODUCT")     as string; } catch { }
+            try { env.ProductVariant = Application.GetSystemVariable("BCADPRODUCT") as string; } catch { }
+            try
+            {
+                var lic = Application.GetSystemVariable("BIMLIC");
+                env.BimModuleAvailable = lic switch
+                {
+                    short s => s != 0,
+                    int i   => i != 0,
+                    long l  => l != 0,
+                    string str => str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase),
+                    _       => false
+                };
+            }
+            catch { env.BimModuleAvailable = false; }
+            return env;
         }
 
         // ── Layers ───────────────────────────────────────────────────────────────────
@@ -133,7 +167,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             SourceSoftware        = "bricscad",
             SourceSoftwareVersion = ctx.SourceSoftwareVersion,
             SourceSoftwareType    = "2d_cad",
-            PluginVersion         = "1.0.11",
+            PluginVersion         = "1.0.13",
             FileNameHash          = ctx.FileNameHash,
             FileNameDisplay       = ctx.FileNameDisplay,
             DocumentProjectToken  = ctx.DocumentProjectToken,
