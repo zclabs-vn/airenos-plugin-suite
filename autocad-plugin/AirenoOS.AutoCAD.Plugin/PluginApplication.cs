@@ -55,6 +55,9 @@ namespace AirenoOS.AutoCAD.Plugin
                 HookSaveComplete(open);
             }
 
+            // Free feature: background poll for highlight requests pushed by the MCP cockpit.
+            HighlightManager.Start();
+
             var ed = Application.DocumentManager.MdiActiveDocument?.Editor;
             ed?.WriteMessage("\nAirenoOS Plugin loaded. Commands: AIRENO_CONNECT, AIRENO_EXTRACT, AIRENO_WRITEBACK\n");
         }
@@ -62,6 +65,7 @@ namespace AirenoOS.AutoCAD.Plugin
         public void Terminate()
         {
             IsShuttingDown = true;
+            HighlightManager.Stop();
         }
 
         private void OnDocumentCreated(object? sender, DocumentCollectionEventArgs e)

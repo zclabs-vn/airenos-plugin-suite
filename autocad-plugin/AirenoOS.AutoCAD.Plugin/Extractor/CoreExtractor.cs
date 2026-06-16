@@ -143,7 +143,7 @@ namespace AirenoOS.AutoCAD.Plugin.Extractor
             SourceSoftware        = "autocad",
             SourceSoftwareVersion = ctx.SourceSoftwareVersion,
             SourceSoftwareType    = "2d_cad",
-            PluginVersion         = "1.0.11",
+            PluginVersion         = "1.0.2",
             FileNameHash          = ctx.FileNameHash,
             FileNameDisplay       = ctx.FileNameDisplay,
             DocumentProjectToken  = ctx.DocumentProjectToken,

@@ -263,6 +263,20 @@
       user-select: none;
     }
     .confirm-btn:hover { background: rgba(127,219,255,0.25); }
+    .highlight-btn {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 8px;
+      border-radius: 10px;
+      background: rgba(255,221,87,0.12);
+      color: #ffdd57;
+      border: 1px solid rgba(255,221,87,0.35);
+      cursor: pointer;
+      font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+    .highlight-btn:hover { background: rgba(255,221,87,0.25); }
   </style>
 </head>
 <body>
@@ -600,6 +614,37 @@
       }
     }
 
+    // ── Highlight request (free feature) ──────────────────────────────────────────
+    // Pushes a (token, native_ids[]) entry to /v1/admin/highlight. Plugins polling
+    // /v1/highlight on the matching document_project_token pick it up within their
+    // poll interval (~3s) and flash the matching entity on screen.
+
+    async function requestHighlight(objectSignal) {
+      const g1 = objectSignal.group_1_identity || {};
+      const docToken = currentPayload?.document_project_token;
+      if (!docToken || !g1.native_id) {
+        Toast.fire({ icon: 'error', title: 'Missing document_project_token or native_id' });
+        return;
+      }
+      try {
+        const res = await fetch('/v1/admin/highlight', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer inspector-ui',
+          },
+          body: JSON.stringify({
+            document_project_token: docToken,
+            native_ids: [g1.native_id],
+          }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        Toast.fire({ icon: 'success', title: 'Highlight queued (TTL 10s) — plugin will pick up on next poll' });
+      } catch (err) {
+        Toast.fire({ icon: 'error', title: 'Highlight failed: ' + err.message });
+      }
+    }
+
     // ── JSON tree renderer with collapsible {} / [] nodes ────────────────────────
     // Each composite node renders as:
     //   ▼ { <content indented> } ,?       (expanded — default)
@@ -663,8 +708,8 @@
       wrap.appendChild(txt(openChar, 'j-punct'));
 
       // If this composite looks like a plugin ObjectSignal (has group_1_identity
-      // with non-null native_id), inject a "Confirm" button so the inspector
-      // user can mock Brian's MCP cockpit confirmation step.
+      // with non-null native_id), inject Confirm + Highlight buttons so the
+      // inspector user can mock Brian's MCP cockpit actions.
       if (!isArray && value && value.group_1_identity && value.group_1_identity.native_id) {
         const btn = el('span', 'confirm-btn');
         btn.textContent = 'Confirm';
@@ -674,6 +719,15 @@
           openConfirmDialog(value);
         });
         wrap.appendChild(btn);
+
+        const hbtn = el('span', 'highlight-btn');
+        hbtn.textContent = 'Highlight';
+        hbtn.title = 'Tell plugins polling this document to flash this object for the user';
+        hbtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          requestHighlight(value);
+        });
+        wrap.appendChild(hbtn);
       }
 
       // Collapsed info span — visible only when collapsed

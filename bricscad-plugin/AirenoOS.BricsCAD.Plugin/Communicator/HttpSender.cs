@@ -253,6 +253,57 @@ namespace AirenoOS.BricsCAD.Plugin.Communicator
                 return new List<ServerWriteback>();
             }
         }
+
+        /// <summary>
+        /// Free-feature highlight: polls /v1/highlight for any pending highlight requests
+        /// pushed by the MCP cockpit. Consume-on-read on the server side, so the same
+        /// request never replays on the next poll cycle.
+        /// </summary>
+        public static async Task<List<HighlightRequest>> FetchHighlightsAsync(Database db)
+        {
+            string endpoint, token;
+            try
+            {
+                (endpoint, token) = ConnectionConfig.Load(db);
+            }
+            catch
+            {
+                return new List<HighlightRequest>();
+            }
+            if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(token))
+                return new List<HighlightRequest>();
+
+            var highlightUrl = System.Text.RegularExpressions.Regex.Replace(
+                endpoint, "/v1/extract", "/v1/highlight",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var docToken = ProjectTokenManager.GetProjectToken(db);
+            var url = $"{highlightUrl}?document_project_token={System.Uri.EscapeDataString(docToken)}";
+
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var resp = await Client.SendAsync(req).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) return new List<HighlightRequest>();
+                var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var list = JsonSerializer.Deserialize<List<HighlightRequest>>(body, JsonOpts);
+                return list ?? new List<HighlightRequest>();
+            }
+            catch
+            {
+                return new List<HighlightRequest>();
+            }
+        }
+    }
+
+    /// <summary>Shape of one item returned by GET /v1/highlight.</summary>
+    internal class HighlightRequest
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("document_project_token")]
+        public string? DocumentProjectToken { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("native_ids")]
+        public List<string>? NativeIds { get; set; }
     }
 
     /// <summary>Shape of one item returned by GET /v1/writeback.</summary>

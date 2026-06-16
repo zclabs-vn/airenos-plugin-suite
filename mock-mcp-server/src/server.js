@@ -142,6 +142,30 @@ app.delete('/v1/admin/confirmations', async (_req, res) => {
   res.json({ status: 'cleared' });
 });
 
+// ── Highlight queue (free feature: highlight-on-click) ────────────────────────
+//
+// POST /v1/admin/highlight  — cockpit pushes a (token, native_ids[]) entry,
+//                              TTL 10s. Operator clicks "Highlight" on a payload
+//                              row; the plugin polling /v1/highlight picks it
+//                              up and draws a transient overlay on the matching
+//                              entity in the open drawing.
+// GET  /v1/highlight        — plugin polls. Consume-on-read so the same entry
+//                              never replays in subsequent poll cycles.
+
+app.post('/v1/admin/highlight', bearerAuth, (req, res) => {
+  try {
+    store.addHighlight(req.body || {});
+    res.json({ status: 'queued' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/v1/highlight', bearerAuth, (req, res) => {
+  const token = req.query.document_project_token;
+  res.json(store.consumeHighlights(token));
+});
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
@@ -150,6 +174,8 @@ app.listen(PORT, () => {
   console.log(`  POST ${url}/v1/extract            — plugin extract endpoint`);
   console.log(`  GET  ${url}/v1/writeback          — plugin writeback fetch`);
   console.log(`  POST ${url}/v1/admin/confirm      — admin marks object confirmed`);
+  console.log(`  POST ${url}/v1/admin/highlight    — admin pushes highlight request`);
+  console.log(`  GET  ${url}/v1/highlight          — plugin polls highlight queue`);
   console.log(`  GET  ${url}/                       — debug UI`);
   console.log(`  GET  ${url}/api/payloads           — JSON list`);
   console.log(`  GET  ${url}/health                 — health check`);

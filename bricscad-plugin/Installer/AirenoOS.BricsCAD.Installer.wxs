@@ -23,7 +23,7 @@
   <Package
       Name="AirenoOS BricsCAD Plugin"
       Manufacturer="ZCLabs"
-      Version="1.0.13.0"
+      Version="1.0.2.0"
       UpgradeCode="C3D1A5A2-AFE6-4F1A-9B0E-A1A2A3A4A5A6"
       Scope="perUser"
       Compressed="yes"
@@ -170,7 +170,7 @@
                        Key="Software\ZCLabs\AirenoOS.BricsCAD.Plugin"
                        Name="PackageContents"
                        Type="string"
-                       Value="1.0.13"
+                       Value="1.0.2"
                        KeyPath="yes" />
         <File
             Id="F_PackageContents"
@@ -190,7 +190,7 @@
                        Key="Software\ZCLabs\AirenoOS.BricsCAD.Plugin"
                        Name="PluginDll"
                        Type="string"
-                       Value="1.0.13"
+                       Value="1.0.2"
                        KeyPath="yes" />
         <File
             Id="F_PluginDll"

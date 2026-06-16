@@ -14,6 +14,12 @@ export class PayloadStore {
     this.maxIndexSize = maxIndexSize;
     this.index = []; // [{ id, receivedAt, summary }] — newest first
     this.confirmations = []; // [{ document_project_token, native_id, aireno_backpack_id, ... }]
+    // Free-feature highlight queue. In-memory only; entries auto-expire after TTL so
+    // that an operator click in the cockpit triggers exactly one plugin-side overlay
+    // without leaving "stuck" highlights around when no plugin is polling.
+    // Shape: [{ document_project_token, native_ids[], expires_at }]
+    this.highlights = [];
+    this.highlightTtlMs = 10_000;
   }
 
   async init() {
@@ -51,6 +57,48 @@ export class PayloadStore {
   async clearConfirmations() {
     this.confirmations = [];
     await this.#persistConfirmations();
+  }
+
+  // ── Highlight queue (free feature) ───────────────────────────────────────────
+  //
+  // Cockpit pushes a (token, native_ids[]) entry; the plugin polls and finds
+  // anything fresh and unconsumed. Entries are dropped after TTL so that the
+  // queue self-clears even if no plugin is currently polling — avoids stale
+  // "highlight" instructions surviving across sessions.
+
+  addHighlight({ document_project_token, native_ids }) {
+    if (!document_project_token) throw new Error('document_project_token required');
+    if (!Array.isArray(native_ids) || native_ids.length === 0) {
+      throw new Error('native_ids must be a non-empty array');
+    }
+    this.#pruneExpiredHighlights();
+    this.highlights.push({
+      document_project_token,
+      native_ids: native_ids.filter((s) => typeof s === 'string' && s.length > 0),
+      expires_at: Date.now() + this.highlightTtlMs,
+    });
+  }
+
+  /// Returns and *consumes* every highlight entry whose token matches and that
+  /// hasn't expired yet. Consume-on-read makes the call idempotent for the
+  /// plugin: it can poll on a tight interval without re-applying the same
+  /// overlay every cycle.
+  consumeHighlights(documentProjectToken) {
+    this.#pruneExpiredHighlights();
+    if (!documentProjectToken) return [];
+    const matched = [];
+    const remaining = [];
+    for (const h of this.highlights) {
+      if (h.document_project_token === documentProjectToken) matched.push(h);
+      else remaining.push(h);
+    }
+    this.highlights = remaining;
+    return matched;
+  }
+
+  #pruneExpiredHighlights() {
+    const now = Date.now();
+    this.highlights = this.highlights.filter((h) => h.expires_at > now);
   }
 
   async #hydrateConfirmations() {
