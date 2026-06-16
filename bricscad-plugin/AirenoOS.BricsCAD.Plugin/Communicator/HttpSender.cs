@@ -156,7 +156,11 @@ namespace AirenoOS.BricsCAD.Plugin.Communicator
             {
                 try
                 {
-                    var json = await File.ReadAllTextAsync(file);
+                    string json;
+                    using (var reader = new StreamReader(file))
+                    {
+                        json = await reader.ReadToEndAsync().ConfigureAwait(false);
+                    }
                     if (await TrySend(endpoint, token, json))
                     {
                         File.Delete(file);

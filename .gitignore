@@ -1,6 +1,9 @@
 # Internal docs — not for public repo
 docs/
 
+# Vendored CAD SDK DLLs — Bricsys IP, do NOT commit
+bricscad-plugin/lib/
+
 # Local scripts
 setup-git.ps1
 

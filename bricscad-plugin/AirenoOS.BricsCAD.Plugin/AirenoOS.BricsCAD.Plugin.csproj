@@ -1,45 +1,56 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Brian #10 — dual-target so the SAME bundle works on both BricsCAD editions:
+           net48           → V25 hosts plugins on .NET Framework 4.x CLR
+           net8.0-windows  → V26 hosts plugins on .NET 8 (BrxMgd ships runtimeconfig.json) -->
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
     <AssemblyName>AirenoOS.BricsCAD.Plugin</AssemblyName>
     <RootNamespace>AirenoOS.BricsCAD.Plugin</RootNamespace>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
-    <!-- BricsCAD loads the DLL — do not generate an exe -->
     <Optimize>true</Optimize>
-
-    <!-- Brian #10 — build against whichever BricsCAD edition is available on this
-         machine. Try V26 first (current preferred), fall back to V25. The compiled
-         DLL is binary-compatible with both because both expose the same Bricscad.*
-         and Teigha.* surface used here. Override BricsCADDir on the command line to
-         force a specific path (CI servers etc). -->
-    <BricsCADDir Condition="'$(BricsCADDir)' == '' AND Exists('C:\Program Files\Bricsys\BricsCAD V26 en_US\BrxMgd.dll')">C:\Program Files\Bricsys\BricsCAD V26 en_US</BricsCADDir>
-    <BricsCADDir Condition="'$(BricsCADDir)' == '' AND Exists('C:\Program Files\Bricsys\BricsCAD V25 en_US\BrxMgd.dll')">C:\Program Files\Bricsys\BricsCAD V25 en_US</BricsCADDir>
-    <BricsCADDir Condition="'$(BricsCADDir)' == ''">C:\Program Files\Bricsys\BricsCAD V26 en_US</BricsCADDir>
   </PropertyGroup>
 
   <!--
-    BricsCAD V26 .NET API — two managed wrapper DLLs (analogous to AutoCAD's AcMgd + AcDbMgd):
-      BrxMgd.dll  → Bricscad.ApplicationServices, Bricscad.EditorInput, Bricscad.Runtime (CommandMethod, ExtensionApplication)
+    BricsCAD .NET wrapper DLLs:
+      BrxMgd.dll  → Bricscad.ApplicationServices, Bricscad.EditorInput, Bricscad.Runtime
       TD_Mgd.dll  → Teigha.DatabaseServices, Teigha.Geometry, Teigha.Runtime, Teigha.GraphicsInterface
-    Bricsys also exposes Bricscad.DatabaseServices etc. as aliases. We import the canonical namespaces in code.
+
+    V25 ships these as .NET Framework 4.8 assemblies. V26 ships them as .NET 8 assemblies.
+    Each target framework references the matching wrapper. V25 wrappers are vendored under
+    bricscad-plugin/lib/V25/ (not committed) so the build doesn't require a V25 install on
+    every dev machine; V26 wrappers come from the standard install path.
   -->
-  <ItemGroup>
+
+  <!-- net48 → BricsCAD V25 wrappers -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <Reference Include="BrxMgd">
-      <HintPath>$(BricsCADDir)\BrxMgd.dll</HintPath>
+      <HintPath>$(MSBuildThisFileDirectory)..\lib\V25\BrxMgd.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="TD_Mgd">
-      <HintPath>$(BricsCADDir)\TD_Mgd.dll</HintPath>
+      <HintPath>$(MSBuildThisFileDirectory)..\lib\V25\TD_Mgd.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.Net.Http" Version="4.3.4" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- net8.0-windows → BricsCAD V26 wrappers -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <Reference Include="BrxMgd">
+      <HintPath>C:\Program Files\Bricsys\BricsCAD V26 en_US\BrxMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TD_Mgd">
+      <HintPath>C:\Program Files\Bricsys\BricsCAD V26 en_US\TD_Mgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 

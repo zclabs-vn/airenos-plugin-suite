@@ -167,7 +167,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             SourceSoftware        = "bricscad",
             SourceSoftwareVersion = ctx.SourceSoftwareVersion,
             SourceSoftwareType    = "2d_cad",
-            PluginVersion         = "1.0.2",
+            PluginVersion         = "1.0.3",
             FileNameHash          = ctx.FileNameHash,
             FileNameDisplay       = ctx.FileNameDisplay,
             DocumentProjectToken  = ctx.DocumentProjectToken,
@@ -446,8 +446,12 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
         {
             if (string.IsNullOrEmpty(path)) return string.Empty;
             var bytes = System.Text.Encoding.UTF8.GetBytes(Path.GetFileName(path).ToLowerInvariant());
-            var hash = System.Security.Cryptography.SHA256.HashData(bytes);
-            return Convert.ToHexString(hash)[..16];
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var hash = sha.ComputeHash(bytes);
+                var hex = BitConverter.ToString(hash).Replace("-", string.Empty);
+                return hex.Substring(0, 16);
+            }
         }
 
         /// <summary>

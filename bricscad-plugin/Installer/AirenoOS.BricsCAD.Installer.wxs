@@ -22,10 +22,10 @@
 
   <Package
       Name="AirenoOS BricsCAD Plugin"
-      Manufacturer="ZCLabs"
-      Version="1.0.2.0"
+      Manufacturer="AirenoOS"
+      Version="1.0.3.0"
       UpgradeCode="C3D1A5A2-AFE6-4F1A-9B0E-A1A2A3A4A5A6"
-      Scope="perUser"
+      Scope="perMachine"
       Compressed="yes"
       InstallerVersion="500">
 
@@ -82,17 +82,26 @@
             Message="Neither BricsCAD V25 nor V26 was detected in &quot;C:\Program Files\Bricsys\&quot;. Install BricsCAD first, then re-run this installer." />
 
     <!-- ───────────────────────────────────────────────────────────────────────
-         Install layout — single bundle deploys to %APPDATA% per Brian #9.
-         The same .dll is binary-compatible with BricsCAD V25 and V26 (both
-         expose the same Bricscad.* + Teigha.* surface), so only one Contents/
-         subfolder is shipped regardless of which checkboxes are ticked.
+         Install layout — bundle deploys to %ProgramFiles%\Bricsys\ApplicationPlugins\.
+         This is the canonical machine-wide path that v1.0.0 used and that V26
+         picked up at runtime; %APPDATA% (v1.0.2) and %ProgramData% (first try
+         of v1.0.3) failed silently on BricsCAD V25. ProgramFiles64Folder is
+         the lowest-common-denominator location all BricsCAD versions scan
+         during startup.
+
+         Two host-specific subfolders so each BricsCAD edition loads the DLL
+         compiled for its CLR:
+           Contents/V25/  → .NET Framework 4.8 DLL  (BricsCAD V25 host)
+           Contents/V26/  → .NET 8 DLL              (BricsCAD V26 host)
+         PackageContents.xml gates each via RuntimeRequirements/SeriesMin+Max.
          ─────────────────────────────────────────────────────────────────────── -->
-    <StandardDirectory Id="AppDataFolder">
+    <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="BricsysFolder" Name="Bricsys">
         <Directory Id="AppPluginsFolder" Name="ApplicationPlugins">
           <Directory Id="BundleFolder" Name="AirenoOS.BricsCAD.bundle">
             <Directory Id="ContentsFolder" Name="Contents">
-              <Directory Id="BundleWinSubFolder" Name="Windows" />
+              <Directory Id="BundleV25SubFolder" Name="V25" />
+              <Directory Id="BundleV26SubFolder" Name="V26" />
             </Directory>
           </Directory>
         </Directory>
@@ -164,38 +173,37 @@
       <!-- PackageContents.xml at the bundle root — read by BricsCAD on startup.
            Per-user components must declare an HKCU registry KeyPath (ICE57), so the
            file itself is no longer KeyPath. -->
-      <Component Id="C_PackageContents" Directory="BundleFolder"
-                 Guid="A1B2C3D4-1111-1111-A1B2-A1A1A1A1A1A1">
-        <RegistryValue Root="HKCU"
-                       Key="Software\ZCLabs\AirenoOS.BricsCAD.Plugin"
-                       Name="PackageContents"
-                       Type="string"
-                       Value="1.0.2"
-                       KeyPath="yes" />
+      <!-- perMachine scope: file can be KeyPath directly (no HKCU registry trick). -->
+      <Component Id="C_PackageContents" Directory="BundleFolder">
         <File
             Id="F_PackageContents"
             Name="PackageContents.xml"
-            Source="PackageContents.xml" />
+            Source="PackageContents.xml"
+            KeyPath="yes" />
         <RemoveFolder Id="RemoveBundleRoot"   On="uninstall" />
         <RemoveFolder Id="RemoveAppPlugins"   Directory="AppPluginsFolder" On="uninstall" />
         <RemoveFolder Id="RemoveBricsysRoot"  Directory="BricsysFolder"    On="uninstall" />
         <RemoveFolder Id="RemoveContentsDir"  Directory="ContentsFolder"   On="uninstall" />
-        <RemoveFolder Id="RemoveBundleWinDir" Directory="BundleWinSubFolder" On="uninstall" />
+        <RemoveFolder Id="RemoveV25Dir"       Directory="BundleV25SubFolder" On="uninstall" />
+        <RemoveFolder Id="RemoveV26Dir"       Directory="BundleV26SubFolder" On="uninstall" />
       </Component>
 
-      <!-- The actual plugin DLL -->
-      <Component Id="C_PluginDll" Directory="BundleWinSubFolder"
-                 Guid="A1B2C3D4-2222-2222-A2B2-A2A2A2A2A2A2">
-        <RegistryValue Root="HKCU"
-                       Key="Software\ZCLabs\AirenoOS.BricsCAD.Plugin"
-                       Name="PluginDll"
-                       Type="string"
-                       Value="1.0.2"
-                       KeyPath="yes" />
+      <!-- BricsCAD V25 host (.NET Framework 4.8) -->
+      <Component Id="C_PluginDllV25" Directory="BundleV25SubFolder">
         <File
-            Id="F_PluginDll"
+            Id="F_PluginDllV25"
             Name="AirenoOS.BricsCAD.Plugin.dll"
-            Source="$(var.PluginDll)" />
+            Source="$(var.PluginDllV25)"
+            KeyPath="yes" />
+      </Component>
+
+      <!-- BricsCAD V26 host (.NET 8) -->
+      <Component Id="C_PluginDllV26" Directory="BundleV26SubFolder">
+        <File
+            Id="F_PluginDllV26"
+            Name="AirenoOS.BricsCAD.Plugin.dll"
+            Source="$(var.PluginDllV26)"
+            KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>

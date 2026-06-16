@@ -41,21 +41,26 @@ if (-not (Test-Path $PluginCsproj)) {
     throw "Plugin csproj not found at $PluginCsproj"
 }
 
-Write-Host "[1/3] Publishing plugin ($Configuration / x64)..." -ForegroundColor Cyan
+Write-Host "[1/3] Building plugin (dual-target net48 + net8.0-windows / $Configuration / x64)..." -ForegroundColor Cyan
 if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
-New-Item -ItemType Directory -Force -Path $StagingDir | Out-Null
+New-Item -ItemType Directory -Force -Path "$StagingDir\V25" | Out-Null
+New-Item -ItemType Directory -Force -Path "$StagingDir\V26" | Out-Null
 
-dotnet publish $PluginCsproj `
+# Build both targets in one pass — produces bin\Release\net48\ + bin\Release\net8.0-windows\.
+dotnet build $PluginCsproj `
     -c $Configuration `
     -p:Platform=x64 `
-    -o $StagingDir `
     --nologo `
     -v minimal | Out-Host
 
-$PublishedDll = Join-Path $StagingDir "AirenoOS.BricsCAD.Plugin.dll"
-if (-not (Test-Path $PublishedDll)) {
-    throw "Plugin DLL not produced at $PublishedDll"
+$PluginBinDir = Join-Path (Split-Path $PluginCsproj) "bin\Release"
+$PluginDllV25 = Join-Path $PluginBinDir "net48\AirenoOS.BricsCAD.Plugin.dll"
+$PluginDllV26 = Join-Path $PluginBinDir "net8.0-windows\AirenoOS.BricsCAD.Plugin.dll"
+foreach ($p in @($PluginDllV25, $PluginDllV26)) {
+    if (-not (Test-Path $p)) { throw "Plugin DLL not produced at $p" }
 }
+Copy-Item $PluginDllV25 "$StagingDir\V25\AirenoOS.BricsCAD.Plugin.dll"
+Copy-Item $PluginDllV26 "$StagingDir\V26\AirenoOS.BricsCAD.Plugin.dll"
 
 Write-Host "[2/3] Building MSI..." -ForegroundColor Cyan
 Push-Location $InstallerDir
@@ -63,7 +68,8 @@ try {
     wix build AirenoOS.BricsCAD.Installer.wxs `
         -arch x64 `
         -ext WixToolset.UI.wixext `
-        -d "PluginDll=$PublishedDll" `
+        -d "PluginDllV25=$StagingDir\V25\AirenoOS.BricsCAD.Plugin.dll" `
+        -d "PluginDllV26=$StagingDir\V26\AirenoOS.BricsCAD.Plugin.dll" `
         -o $MsiOut
 }
 finally {

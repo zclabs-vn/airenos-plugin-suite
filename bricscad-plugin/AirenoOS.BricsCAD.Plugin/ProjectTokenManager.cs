@@ -53,8 +53,12 @@ namespace AirenoOS.BricsCAD.Plugin
         private static string GetPathHash(string path)
         {
             var bytes = System.Text.Encoding.UTF8.GetBytes(path.ToLowerInvariant());
-            var hash = System.Security.Cryptography.SHA256.HashData(bytes);
-            return Convert.ToHexString(hash)[..16];
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var hash = sha.ComputeHash(bytes);
+                var hex = BitConverter.ToString(hash).Replace("-", string.Empty);
+                return hex.Substring(0, 16);
+            }
         }
 
         private static string? GetStringFromNod(DBDictionary nod, Transaction tr, string key)
