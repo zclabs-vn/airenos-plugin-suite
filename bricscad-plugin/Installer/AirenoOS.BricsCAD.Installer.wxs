@@ -23,7 +23,7 @@
   <Package
       Name="AirenoOS BricsCAD Plugin"
       Manufacturer="AirenoOS"
-      Version="1.0.3.0"
+      Version="1.0.7.0"
       UpgradeCode="C3D1A5A2-AFE6-4F1A-9B0E-A1A2A3A4A5A6"
       Scope="perUser"
       Compressed="yes"
@@ -67,15 +67,19 @@
     <Property Id="INSTALL_V25" Secure="yes" />
     <Property Id="INSTALL_V26" Secure="yes" />
 
-    <SetProperty Id="INSTALL_V25" Value="1" After="AppSearch" Condition="BRICSCAD_V25_FOUND" Sequence="ui" />
-    <SetProperty Id="INSTALL_V26" Value="1" After="AppSearch" Condition="BRICSCAD_V26_FOUND" Sequence="ui" />
+    <!-- Run in BOTH ui and execute sequences so silent installs (/qb /qn) also
+         pick up the detected versions. Sequence="ui" alone meant /qb left both
+         flags empty → Feature Level=0 → MSI installs zero components and
+         reports success — verified 2026-06-17 in airenos-install.log. -->
+    <SetProperty Id="INSTALL_V25" Value="1" After="AppSearch" Condition="BRICSCAD_V25_FOUND" Sequence="both" />
+    <SetProperty Id="INSTALL_V26" Value="1" After="AppSearch" Condition="BRICSCAD_V26_FOUND" Sequence="both" />
 
     <!-- Status labels next to each checkbox — flips to "(detected)" when the
          corresponding bricscad.exe was found at AppSearch time. -->
     <Property Id="STATUS_V25" Value="(not installed)" />
     <Property Id="STATUS_V26" Value="(not installed)" />
-    <SetProperty Id="STATUS_V25" Value="(detected)" After="AppSearch" Condition="BRICSCAD_V25_FOUND" Sequence="ui" />
-    <SetProperty Id="STATUS_V26" Value="(detected)" After="AppSearch" Condition="BRICSCAD_V26_FOUND" Sequence="ui" />
+    <SetProperty Id="STATUS_V25" Value="(detected)" After="AppSearch" Condition="BRICSCAD_V25_FOUND" Sequence="both" />
+    <SetProperty Id="STATUS_V26" Value="(detected)" After="AppSearch" Condition="BRICSCAD_V26_FOUND" Sequence="both" />
 
     <!-- Refuse to launch if zero BricsCAD versions are present on the machine. -->
     <Launch Condition="BRICSCAD_V25_FOUND OR BRICSCAD_V26_FOUND"
@@ -173,7 +177,7 @@
            Per-user components must declare an HKCU registry KeyPath (ICE57), so the
            file itself is no longer KeyPath. -->
       <!-- perMachine scope: file can be KeyPath directly (no HKCU registry trick). -->
-      <Component Id="C_PackageContents" Directory="BundleFolder">
+      <Component Id="C_PackageContents" Directory="BundleFolder" Guid="$(var.G_PackageContents)">
         <File
             Id="F_PackageContents"
             Name="PackageContents.xml"
@@ -189,15 +193,47 @@
 
       <!-- BricsCAD V25 host (.NET Framework 4.8).
            net48 builds aren't self-contained: System.Text.Json + 8 transitive
-           NuGet DLLs ship alongside the plugin DLL. Without these, BricsCAD V25
-           NETLOADs the plugin but HttpSender's static ctor throws
-           TypeInitializationException (verified 2026-06-16 in session_end.log)
-           and no payload ever leaves the host. <Files> globs every *.dll the
-           build emits into bin\x64\Release\net48\ (= Stage\V25 after copy). -->
-      <Files Directory="BundleV25SubFolder" Include="$(var.PluginDirV25)\*.dll" />
+           NuGet DLLs ship alongside the plugin DLL.
+
+           Explicit Component per DLL — WiX 5's <Files> glob auto-generated
+           components but observed 2026-06-17 that uninstall didn't run their
+           RemoveFile sequence under perUser scope (Win32_Product removed the
+           product record but files + HKCU keys all stayed on disk). Explicit
+           <File> with traditional <Component> uses the MSI File table which
+           uninstalls reliably across scopes. -->
+      <Component Id="C_V25_Plugin"   Directory="BundleV25SubFolder" Guid="$(var.G_V25_Plugin)">
+        <File Id="F_V25_Plugin"   Name="AirenoOS.BricsCAD.Plugin.dll"             Source="$(var.PluginDirV25)\AirenoOS.BricsCAD.Plugin.dll"             KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_BclAsync" Directory="BundleV25SubFolder" Guid="$(var.G_V25_BclAsync)">
+        <File Id="F_V25_BclAsync" Name="Microsoft.Bcl.AsyncInterfaces.dll"         Source="$(var.PluginDirV25)\Microsoft.Bcl.AsyncInterfaces.dll"         KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_Buffers" Directory="BundleV25SubFolder" Guid="$(var.G_V25_Buffers)">
+        <File Id="F_V25_Buffers" Name="System.Buffers.dll"                         Source="$(var.PluginDirV25)\System.Buffers.dll"                         KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_Memory" Directory="BundleV25SubFolder" Guid="$(var.G_V25_Memory)">
+        <File Id="F_V25_Memory" Name="System.Memory.dll"                           Source="$(var.PluginDirV25)\System.Memory.dll"                           KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_Numerics" Directory="BundleV25SubFolder" Guid="$(var.G_V25_Numerics)">
+        <File Id="F_V25_Numerics" Name="System.Numerics.Vectors.dll"               Source="$(var.PluginDirV25)\System.Numerics.Vectors.dll"               KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_Unsafe" Directory="BundleV25SubFolder" Guid="$(var.G_V25_Unsafe)">
+        <File Id="F_V25_Unsafe" Name="System.Runtime.CompilerServices.Unsafe.dll" Source="$(var.PluginDirV25)\System.Runtime.CompilerServices.Unsafe.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_EncWeb" Directory="BundleV25SubFolder" Guid="$(var.G_V25_EncWeb)">
+        <File Id="F_V25_EncWeb" Name="System.Text.Encodings.Web.dll"               Source="$(var.PluginDirV25)\System.Text.Encodings.Web.dll"               KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_Json" Directory="BundleV25SubFolder" Guid="$(var.G_V25_Json)">
+        <File Id="F_V25_Json" Name="System.Text.Json.dll"                          Source="$(var.PluginDirV25)\System.Text.Json.dll"                          KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_TasksExt" Directory="BundleV25SubFolder" Guid="$(var.G_V25_TasksExt)">
+        <File Id="F_V25_TasksExt" Name="System.Threading.Tasks.Extensions.dll"     Source="$(var.PluginDirV25)\System.Threading.Tasks.Extensions.dll"     KeyPath="yes" />
+      </Component>
+      <Component Id="C_V25_ValueTuple" Directory="BundleV25SubFolder" Guid="$(var.G_V25_ValueTuple)">
+        <File Id="F_V25_ValueTuple" Name="System.ValueTuple.dll"                   Source="$(var.PluginDirV25)\System.ValueTuple.dll"                   KeyPath="yes" />
+      </Component>
 
       <!-- BricsCAD V26 host (.NET 8) -->
-      <Component Id="C_PluginDllV26" Directory="BundleV26SubFolder">
+      <Component Id="C_PluginDllV26" Directory="BundleV26SubFolder" Guid="$(var.G_V26_Plugin)">
         <File
             Id="F_PluginDllV26"
             Name="AirenoOS.BricsCAD.Plugin.dll"
@@ -226,7 +262,7 @@
            Conditional on the corresponding BRICSCAD_VXX_FOUND search property
            so we don't litter the registry of hosts that aren't installed.
            ─────────────────────────────────────────────────────────────────── -->
-      <Component Id="C_RegV25" Directory="BundleV25SubFolder" Condition="BRICSCAD_V25_FOUND">
+      <Component Id="C_RegV25" Directory="BundleV25SubFolder" Condition="BRICSCAD_V25_FOUND" Guid="$(var.G_RegV25)">
         <RegistryKey Root="HKCU" Key="Software\Bricsys\BricsCAD\V25x64\en_US\Applications\AirenoOS">
           <RegistryValue Type="string"  Name="DESCRIPTION" Value="AirenoOS metadata sync (V25)" />
           <RegistryValue Type="integer" Name="LOADCTRLS"   Value="14" />
@@ -235,7 +271,7 @@
         </RegistryKey>
       </Component>
 
-      <Component Id="C_RegV26" Directory="BundleV26SubFolder" Condition="BRICSCAD_V26_FOUND">
+      <Component Id="C_RegV26" Directory="BundleV26SubFolder" Condition="BRICSCAD_V26_FOUND" Guid="$(var.G_RegV26)">
         <RegistryKey Root="HKCU" Key="Software\Bricsys\BricsCAD\V26x64\en_US\Applications\AirenoOS">
           <RegistryValue Type="string"  Name="DESCRIPTION" Value="AirenoOS metadata sync (V26)" />
           <RegistryValue Type="integer" Name="LOADCTRLS"   Value="14" />

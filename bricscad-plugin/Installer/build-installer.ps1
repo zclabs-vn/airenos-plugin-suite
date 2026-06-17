@@ -72,6 +72,28 @@ Copy-Item -Path "$PluginDirV26\AirenoOS.BricsCAD.Plugin.dll" -Destination "$Stag
 Write-Host "V25 bundle ships: $((Get-ChildItem "$StagingDir\V25\*.dll").Name -join ', ')" -ForegroundColor DarkGray
 
 Write-Host "[2/3] Building MSI..." -ForegroundColor Cyan
+# Generate a fresh GUID per Component every build. Previously the WiX-generated
+# stable GUIDs were shared across builds, so a 1.0.6 uninstall hit "another
+# client exists" for the orphan refs left by 1.0.3/4/5 uninstalls (verified
+# 2026-06-17 in airenos-uninstall-106.log) and skipped file deletion. Fresh
+# GUIDs per build mean each MSI's components are owned only by itself —
+# orphans from prior versions don't block our uninstall.
+function New-WixGuid { "{$([Guid]::NewGuid().ToString().ToUpper())}" }
+$gPackageContents = New-WixGuid
+$gV25Plugin       = New-WixGuid
+$gV25BclAsync     = New-WixGuid
+$gV25Buffers      = New-WixGuid
+$gV25Memory       = New-WixGuid
+$gV25Numerics     = New-WixGuid
+$gV25Unsafe       = New-WixGuid
+$gV25EncWeb       = New-WixGuid
+$gV25Json         = New-WixGuid
+$gV25TasksExt     = New-WixGuid
+$gV25ValueTuple   = New-WixGuid
+$gV26Plugin       = New-WixGuid
+$gRegV25          = New-WixGuid
+$gRegV26          = New-WixGuid
+
 Push-Location $InstallerDir
 try {
     wix build AirenoOS.BricsCAD.Installer.wxs `
@@ -79,6 +101,20 @@ try {
         -ext WixToolset.UI.wixext `
         -d "PluginDirV25=$StagingDir\V25" `
         -d "PluginDllV26=$StagingDir\V26\AirenoOS.BricsCAD.Plugin.dll" `
+        -d "G_PackageContents=$gPackageContents" `
+        -d "G_V25_Plugin=$gV25Plugin" `
+        -d "G_V25_BclAsync=$gV25BclAsync" `
+        -d "G_V25_Buffers=$gV25Buffers" `
+        -d "G_V25_Memory=$gV25Memory" `
+        -d "G_V25_Numerics=$gV25Numerics" `
+        -d "G_V25_Unsafe=$gV25Unsafe" `
+        -d "G_V25_EncWeb=$gV25EncWeb" `
+        -d "G_V25_Json=$gV25Json" `
+        -d "G_V25_TasksExt=$gV25TasksExt" `
+        -d "G_V25_ValueTuple=$gV25ValueTuple" `
+        -d "G_V26_Plugin=$gV26Plugin" `
+        -d "G_RegV25=$gRegV25" `
+        -d "G_RegV26=$gRegV26" `
         -o $MsiOut
 }
 finally {
