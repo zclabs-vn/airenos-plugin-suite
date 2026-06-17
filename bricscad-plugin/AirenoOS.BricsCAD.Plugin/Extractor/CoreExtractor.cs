@@ -329,6 +329,10 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
                     var bim = BimSupport.TryReadEntity(id);
                     if (bim == null) continue;
+                    // BIM_SPACE / BIM_ROOM classifications are emitted as rooms,
+                    // not objects (ExtractBimRooms picks them up). Skip here so
+                    // the same entity doesn't appear in both arrays.
+                    if (IsBimRoomClassification(bim.Category)) continue;
                     // Stable identity: prefer GlobalGuid (BIM Room/Space) else
                     // entity Handle (any BIM-classified solid).
                     if (string.IsNullOrEmpty(bim.GlobalGuid))
@@ -528,14 +532,24 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
         /// <summary>
         /// Customer feedback #10 — primary room extraction path on BIM hosts.
-        /// Calls BIMRoom.GetAllRooms(db) static method to enumerate every BIM
-        /// Room/Space in the drawing. Each becomes a RoomSignal with the room's
-        /// stable handle as native_id and BIM-native name/number/area. Returns
-        /// count so caller can decide whether to run the polyline fallback.
+        ///
+        /// Two BIM-side sources for rooms on V25:
+        ///   1. Legacy V20-era BIMRoom entities — enumerated via
+        ///      BIMRoom.GetAllRooms(db).
+        ///   2. V21+ Spaces created by the BIMSPACE command — these live in
+        ///      ModelSpace as 3D solids classified "BIM_SPACE" / "BIM_ROOM",
+        ///      so we scan the modelspace second-pass loop's results and
+        ///      hoist any BIM_SPACE-classified entry from objects → rooms.
+        ///
+        /// Returns total room count so the caller can decide whether to run
+        /// the legacy polyline fallback (only on drawings with neither path).
         /// </summary>
         private static int ExtractBimRooms(Transaction tr, Database db, ExtractionPayload payload)
         {
             if (!BimSupport.IsBimAvailable) return 0;
+            int count = 0;
+
+            // 1) Legacy BIMRoom enumeration (V20 path).
             var rooms = BimSupport.EnumerateRooms(db);
             foreach (var r in rooms)
             {
@@ -543,7 +557,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 {
                     NativeId         = "h" + r.ObjectHandleHex,
                     RawName          = r.Name ?? r.Number,
-                    LayerOrTag       = null,            // BIM rooms aren't on a CAD layer
+                    LayerOrTag       = null,
                     BoundaryArea     = r.AreaSqm,
                     Volume           = null,
                     Height           = null,
@@ -554,8 +568,50 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                     ContainedObjectNativeIds = null,
                     AirenoosRef      = null
                 });
+                count++;
             }
-            return rooms.Count;
+
+            // 2) V21+ BIM Spaces — scan ModelSpace for any entity whose BIM
+            //    classification name is BIM_SPACE / BIM_ROOM and emit it as a
+            //    RoomSignal instead of an object. Done here (not in the object
+            //    loop) so polyline fallback gating sees the real room count.
+            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            foreach (ObjectId id in ms)
+            {
+                var bim = BimSupport.TryReadEntity(id);
+                if (bim == null) continue;
+                if (!IsBimRoomClassification(bim.Category)) continue;
+
+                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                if (ent == null) continue;
+
+                payload.Rooms.Add(new RoomSignal
+                {
+                    NativeId         = "h" + ent.Handle.Value.ToString("X"),
+                    RawName          = bim.Name,
+                    LayerOrTag       = ent.Layer,
+                    BoundaryArea     = bim.Area,
+                    Volume           = null,
+                    Height           = null,
+                    Unit             = "sqm",
+                    IsClosedBoundary = true,
+                    ZoneNumber       = null,
+                    ZoneCategory     = bim.Category,
+                    ContainedObjectNativeIds = null,
+                    AirenoosRef      = null
+                });
+                count++;
+            }
+
+            return count;
+        }
+
+        private static bool IsBimRoomClassification(string? category)
+        {
+            if (string.IsNullOrEmpty(category)) return false;
+            var c = category!.Trim().ToUpperInvariant();
+            return c == "BIM_SPACE" || c == "BIM_ROOM" || c == "SPACE" || c == "ROOM";
         }
 
         private static void ExtractRoomsFromPolylines(Transaction tr, Database db, ExtractionPayload payload)
