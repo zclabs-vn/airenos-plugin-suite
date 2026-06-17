@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using Bricscad.ApplicationServices;
 using Teigha.DatabaseServices;
@@ -7,7 +9,7 @@ using Teigha.DatabaseServices;
 namespace AirenoOS.BricsCAD.Plugin.Extractor
 {
     /// <summary>
-    /// Defensive bridge to BricsCAD's BIM .NET API (Bricscad.Bim in BrxMgd.dll).
+    /// Bridge to BricsCAD's BIM .NET API (Bricscad.Bim in BrxMgd.dll).
     ///
     /// Customer feedback #10 (2026-06-17): when the host has the BIM module
     /// licensed and active, the plugin should use BIM-native signals — BIM
@@ -15,21 +17,24 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
     /// sets for richer object properties, BIM GlobalGuid as a stable_bim_guid
     /// identity, and source_software_type="bricsCAD_bim" in the payload.
     ///
-    /// Every BIM API call goes through reflection so:
-    ///  - the plugin compiles + runs against V25 and V26 BrxMgd without a
-    ///    direct reference to types that may be renamed across versions
-    ///  - hosts without the BIM module (RUNASLEVEL not 3 / 5) silently skip
-    ///    BIM probing and fall back to the original polyline-based logic
-    ///  - any malformed entity (BIM extension dictionary missing, etc.) is
-    ///    caught at the call site and the object falls through to the legacy
-    ///    extraction path with no payload regression
+    /// BricsCAD V25 exposes the BIM API via STATIC METHODS on BIMClassification,
+    /// BIMRoom, and BIMPropertySet — NOT through instance constructors taking
+    /// ObjectId (verified 2026-06-17 in bim_diag.log: GetConstructor(ObjectId)
+    /// returns null for BIMClassification, so the previous instance-ctor probe
+    /// always fell through to BIMRoom's default-Category="Room" path).
+    ///
+    /// Every call goes through reflection so the plugin compiles + runs against
+    /// V25 and V26 BrxMgd without a managed reference, and gracefully no-ops on
+    /// hosts that don't have the BIM module.
     /// </summary>
     internal static class BimSupport
     {
         private static bool?  _bimAvailable;
+        private static Type?  _bimClassificationType;
         private static Type?  _bimRoomType;
-        private static Type?  _bimAttributeSetType;
+        private static Type?  _bimPropertySetType;
         private static bool   _typesProbed;
+        private static readonly string DiagLogPath = Path.Combine(Path.GetTempPath(), "AirenoOS", "bim_diag.log");
 
         /// <summary>True when RUNASLEVEL indicates a BIM-capable license (BIM=3, Ultimate=5).</summary>
         public static bool IsBimAvailable
@@ -43,8 +48,8 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                     int level = raw switch
                     {
                         short s => s,
-                        int i   => i,
-                        long l  => (int)l,
+                        int   i => i,
+                        long  l => (int)l,
                         string s when int.TryParse(s, out var n) => n,
                         _ => -1
                     };
@@ -61,144 +66,259 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             _typesProbed = true;
             try
             {
-                // BrxMgd is loaded by BricsCAD before our plugin — Type.GetType with
-                // a fully-qualified name (incl. assembly) finds it without a
-                // managed reference and survives BrxMgd version drift across V25/V26.
-                _bimRoomType         = Type.GetType("Bricscad.Bim.BIMRoom, BrxMgd")
-                                    ?? Type.GetType("Bricscad.Bim.BimRoom, BrxMgd");
-                _bimAttributeSetType = Type.GetType("Bricscad.Bim.BIMAttributeSet, BrxMgd")
-                                    ?? Type.GetType("Bricscad.Bim.BimAttributeSet, BrxMgd");
+                _bimClassificationType = Type.GetType("Bricscad.Bim.BIMClassification, BrxMgd");
+                _bimRoomType           = Type.GetType("Bricscad.Bim.BIMRoom, BrxMgd");
+                _bimPropertySetType    = Type.GetType("Bricscad.Bim.BIMPropertySet, BrxMgd");
             }
-            catch { /* either type may be absent on a given build — leave nulls */ }
+            catch { /* leave nulls */ }
         }
 
         /// <summary>
-        /// Try to read BIM-side signals from an entity. Returns null when the entity
-        /// isn't a BIM Room/Space or when the host has no BIM module — callers fall
-        /// back to the legacy block/polyline path.
+        /// Read BIM signals from an arbitrary BIM-classified entity (Wall, Slab,
+        /// Door, Window, …). Uses BIMClassification static methods. Returns null
+        /// when the entity isn't BIM-classified or the host has no BIM module.
         /// </summary>
         public static BimEntityInfo? TryReadEntity(ObjectId entId)
         {
             if (!IsBimAvailable) return null;
             ProbeTypesOnce();
-            if (_bimRoomType == null) return null;
+            if (_bimClassificationType == null) return null;
 
             try
             {
-                var ctor = _bimRoomType.GetConstructor(new[] { typeof(ObjectId) });
-                if (ctor == null) return null;
-                var instance = ctor.Invoke(new object[] { entId });
-                if (instance == null) return null;
+                // Skip if not classified — saves wasted reflection on every solid.
+                var isUnclass = InvokeStatic<bool>(_bimClassificationType, "IsUnclassified", new object[] { entId });
+                if (isUnclass) return null;
 
-                return new BimEntityInfo
+                // localName=false → canonical English name ("Wall" not "Bức tường").
+                var classification = InvokeStatic<string>(_bimClassificationType, "GetClassificationName", new object[] { entId, false });
+                if (string.IsNullOrEmpty(classification)) return null;
+
+                var info = new BimEntityInfo
                 {
-                    Name       = ReadStringProp(instance, "Name", "RoomName", "DisplayName"),
-                    GlobalGuid = ReadStringProp(instance, "GlobalGuid", "GlobalId", "Guid"),
-                    Area       = ReadDoubleProp(instance, "Area", "FloorArea"),
-                    Category   = ReadStringProp(instance, "Category", "ClassificationName"),
-                    IfcClass   = ReadStringProp(instance, "IfcClass", "EntityType"),
-                    Properties = ReadPropertySets(entId)
+                    Category   = classification,
+                    IfcClass   = GuessIfcFromType(classification),
+                    Name       = InvokeStatic<string>(_bimClassificationType, "GetName",        new object[] { entId }),
+                    // GetDescription often returns empty — caller falls through if null.
+                    Properties = ReadAllProperties(entId)
                 };
+                return info;
             }
-            catch
+            catch (Exception ex)
             {
+                DiagLog("TryReadEntity threw for handle " + entId.Handle + ": " + ex.GetType().Name + ": " + ex.Message);
                 return null;
             }
         }
 
         /// <summary>
-        /// Try to read BIM property sets (name → value, flattened across all sets).
-        /// Used to enrich Group6Metadata.bim_properties beyond what XDATA attributes
-        /// expose. Returns null when no property data is available.
+        /// Enumerate every BIM Room/Space in the database via
+        /// BIMRoom.GetAllRooms(database). Each entry gets resolved into a
+        /// BimRoomInfo by calling the per-room getters. Returns an empty list
+        /// when the host has no BIM module or the database has no rooms.
         /// </summary>
-        public static Dictionary<string, string>? ReadPropertySets(ObjectId entId)
+        public static List<BimRoomInfo> EnumerateRooms(Database db)
         {
-            if (!IsBimAvailable) return null;
+            var result = new List<BimRoomInfo>();
+            if (!IsBimAvailable) return result;
             ProbeTypesOnce();
-            if (_bimAttributeSetType == null) return null;
+            if (_bimRoomType == null) return result;
 
             try
             {
-                var ctor = _bimAttributeSetType.GetConstructor(new[] { typeof(ObjectId) });
-                if (ctor == null) return null;
-                var instance = ctor.Invoke(new object[] { entId });
-                if (instance == null) return null;
-
-                var dict = new Dictionary<string, string>();
-                // BIMAttributeSet exposes per-property accessors. Iterate any
-                // System.Collections.IEnumerable returned by Properties/Items, OR
-                // fall back to known string accessors. Best-effort: anything we
-                // can pull, we add; the rest stays null in Group6Metadata.
-                if (instance is System.Collections.IEnumerable directEnum)
+                // Single-arg GetAllRooms(Database) — that's the no-building/no-story overload.
+                var rooms = InvokeStatic<object>(_bimRoomType, "GetAllRooms", new object[] { db });
+                if (rooms is IEnumerable roomEnum)
                 {
-                    PopulateFromEnumerable(directEnum, dict);
-                }
-                else
-                {
-                    foreach (var propName in new[] { "Properties", "Items", "Attributes" })
+                    foreach (var roomObj in roomEnum)
                     {
-                        if (instance.GetType().GetProperty(propName)?.GetValue(instance) is System.Collections.IEnumerable seq)
+                        if (!(roomObj is ObjectId roomId)) continue;
+                        var name = InvokeStatic<string>(_bimRoomType, "GetRoomName",        new object[] { roomId });
+                        var num  = InvokeStatic<string>(_bimRoomType, "GetRoomNumber",      new object[] { roomId });
+                        var area = InvokeStatic<double>(_bimRoomType, "GetRoomArea",        new object[] { roomId });
+                        var desc = InvokeStatic<string>(_bimRoomType, "GetRoomDescription", new object[] { roomId });
+                        var dept = InvokeStatic<string>(_bimRoomType, "GetRoomDepartment",  new object[] { roomId });
+                        result.Add(new BimRoomInfo
                         {
-                            PopulateFromEnumerable(seq, dict);
-                            break;
+                            ObjectHandleHex = roomId.Handle.Value.ToString("X"),
+                            Name        = string.IsNullOrEmpty(name) ? null : name,
+                            Number      = string.IsNullOrEmpty(num)  ? null : num,
+                            AreaSqm     = area > 0 ? (double?)area : null,
+                            Description = string.IsNullOrEmpty(desc) ? null : desc,
+                            Department  = string.IsNullOrEmpty(dept) ? null : dept
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagLog("EnumerateRooms threw: " + ex.GetType().Name + ": " + ex.Message);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Pull every BIM property set value on an entity via
+        /// BIMPropertySet.ListAllProperties(objId, showInvisible=false,
+        /// nameSpace=null). The return is a flat name → string-value dict.
+        /// </summary>
+        public static Dictionary<string, string>? ReadAllProperties(ObjectId entId)
+        {
+            if (!IsBimAvailable) return null;
+            ProbeTypesOnce();
+            if (_bimPropertySetType == null) return null;
+
+            try
+            {
+                var raw = InvokeStatic<object>(_bimPropertySetType, "ListAllProperties",
+                                new object[] { entId, /*showInvisible*/ false, /*nameSpace*/ null! });
+                if (raw == null) return null;
+
+                // ListAllProperties returns Dictionary<string, Dictionary<string, object>> —
+                // outer key is property-set name, inner is property name → value. Flatten.
+                var result = new Dictionary<string, string>();
+                if (raw is IDictionary outer)
+                {
+                    foreach (DictionaryEntry setEntry in outer)
+                    {
+                        if (setEntry.Value is IDictionary inner)
+                        {
+                            foreach (DictionaryEntry propEntry in inner)
+                            {
+                                var name  = propEntry.Key?.ToString();
+                                var value = propEntry.Value?.ToString();
+                                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(value))
+                                    result[name!] = value!;
+                            }
                         }
                     }
                 }
-
-                return dict.Count == 0 ? null : dict;
+                return result.Count == 0 ? null : result;
             }
-            catch
+            catch (Exception ex)
             {
+                DiagLog("ReadAllProperties threw: " + ex.GetType().Name + ": " + ex.Message);
                 return null;
             }
         }
 
-        private static void PopulateFromEnumerable(System.Collections.IEnumerable seq, Dictionary<string, string> dict)
+        // ── Reflection helpers ──────────────────────────────────────────────────
+
+        private static T? InvokeStatic<T>(Type type, string methodName, object[] args)
         {
-            foreach (var item in seq)
+            try
             {
-                if (item == null) continue;
-                var name  = ReadStringProp(item, "Name", "Key", "PropertyName");
-                var value = ReadStringProp(item, "Value", "StringValue")
-                         ?? item.GetType().GetProperty("Value")?.GetValue(item)?.ToString();
-                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(value))
-                    dict[name!] = value!;
+                // Match by name+arg count first to handle overloads like
+                // GetAllRooms(Database) vs GetAllRooms(BIMStory, Database).
+                MethodInfo? method = null;
+                foreach (var m in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                {
+                    if (m.Name != methodName) continue;
+                    if (m.GetParameters().Length != args.Length) continue;
+                    method = m;
+                    break;
+                }
+                if (method == null) return default;
+                var ret = method.Invoke(null, args);
+                if (ret == null) return default;
+                if (ret is T tret) return tret;
+                // Allow enum → string coercion.
+                if (typeof(T) == typeof(string) && ret.GetType().IsEnum) return (T)(object)ret.ToString()!;
+                return default;
+            }
+            catch (Exception ex)
+            {
+                DiagLog("InvokeStatic " + methodName + " threw: " + ex.GetType().Name + ": " + ex.Message);
+                return default;
             }
         }
 
-        private static string? ReadStringProp(object obj, params string[] names)
+        // BIM-classified entities often lack an explicit IFC tag — derive from
+        // the classification type name as a sensible default so the customer's
+        // MCP pipeline gets an ifc_class for every Wall/Slab/Door/Window/etc.
+        // V25 returns names with a BIM_ prefix (e.g. "BIM_WALL"); strip it.
+        private static string? GuessIfcFromType(string typeName)
         {
-            foreach (var n in names)
+            if (string.IsNullOrEmpty(typeName)) return null;
+            var t = typeName.Trim().ToLowerInvariant();
+            if (t.StartsWith("bim_"))     t = t.Substring(4);
+            else if (t.StartsWith("bim")) t = t.Substring(3);
+            return t switch
             {
-                try
-                {
-                    var p = obj.GetType().GetProperty(n, BindingFlags.Public | BindingFlags.Instance);
-                    if (p == null) continue;
-                    var v = p.GetValue(obj);
-                    if (v == null) continue;
-                    var s = v.ToString();
-                    if (!string.IsNullOrEmpty(s)) return s;
-                }
-                catch { /* try next */ }
-            }
-            return null;
+                "wall"           => "IfcWall",
+                "slab"           => "IfcSlab",
+                "door"           => "IfcDoor",
+                "window"         => "IfcWindow",
+                "column"         => "IfcColumn",
+                "beam"           => "IfcBeam",
+                "roof"           => "IfcRoof",
+                "stair"          => "IfcStair",
+                "railing"        => "IfcRailing",
+                "covering"       => "IfcCovering",
+                "curtainwall"    => "IfcCurtainWall",
+                "space"          => "IfcSpace",
+                "room"           => "IfcSpace",
+                "building"       => "IfcBuilding",
+                "story"          => "IfcBuildingStorey",
+                "floor"          => "IfcBuildingStorey",
+                "site"           => "IfcSite",
+                _                => null
+            };
         }
 
-        private static double? ReadDoubleProp(object obj, params string[] names)
+        // ── Diagnostic ──────────────────────────────────────────────────────────
+
+        private static bool _diagDumped;
+
+        /// <summary>One-shot: list every entity in ModelSpace with its runtime
+        /// type, layer, and BIM classification (or "unclassified"). Lets us see
+        /// what the BIM API reports for each solid the customer drew.</summary>
+        public static void DumpModelSpaceDiagnostic(Transaction tr, Database db)
         {
-            foreach (var n in names)
+            if (_diagDumped) return;
+            _diagDumped = true;
+            ProbeTypesOnce();
+            try
             {
-                try
+                var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                int idx = 0;
+                foreach (ObjectId id in ms)
                 {
-                    var p = obj.GetType().GetProperty(n, BindingFlags.Public | BindingFlags.Instance);
-                    if (p == null) continue;
-                    var v = p.GetValue(obj);
-                    if (v is double d) return d;
-                    if (v is float f)  return (double)f;
+                    var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                    if (ent == null) continue;
+                    string classification = "unclassified";
+                    try
+                    {
+                        if (_bimClassificationType != null)
+                        {
+                            var isUnclass = InvokeStatic<bool>(_bimClassificationType, "IsUnclassified", new object[] { id });
+                            if (!isUnclass)
+                            {
+                                classification = InvokeStatic<string>(_bimClassificationType, "GetClassificationName", new object[] { id, false }) ?? "<classified-no-name>";
+                            }
+                        }
+                    }
+                    catch (Exception cx) { classification = "<err:" + cx.Message + ">"; }
+                    DiagLog("[" + idx + "] type=" + ent.GetRXClass().Name + " layer=" + ent.Layer + " handle=" + ent.Handle.Value.ToString("X") + " classification=" + classification);
+                    idx++;
                 }
-                catch { /* try next */ }
+                DiagLog("=== DumpModelSpaceDiagnostic finished (" + idx + " entities) ===");
             }
-            return null;
+            catch (Exception ex)
+            {
+                DiagLog("DumpModelSpaceDiagnostic threw: " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        private static void DiagLog(string msg)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(DiagLogPath)!);
+                File.AppendAllText(DiagLogPath, "[" + DateTime.UtcNow.ToString("O") + "] " + msg + "\n");
+            }
+            catch { }
         }
     }
 
@@ -210,5 +330,15 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
         public string?                       Category   { get; set; }
         public string?                       IfcClass   { get; set; }
         public Dictionary<string, string>?   Properties { get; set; }
+    }
+
+    internal class BimRoomInfo
+    {
+        public string  ObjectHandleHex { get; set; } = string.Empty;
+        public string? Name        { get; set; }
+        public string? Number      { get; set; }
+        public double? AreaSqm     { get; set; }
+        public string? Description { get; set; }
+        public string? Department  { get; set; }
     }
 }

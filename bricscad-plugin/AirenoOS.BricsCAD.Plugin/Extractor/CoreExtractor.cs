@@ -311,6 +311,117 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
                 payload.Objects.Add(sig);
             }
+
+            // Customer feedback #10 — BIM walls/slabs/doors usually live in
+            // ModelSpace as AcDb3dSolids (not BlockReferences). Second pass picks
+            // up any non-block entity that has BIM data so a typical BIM drawing
+            // doesn't surface zero objects. Skipped on non-BIM hosts so the legacy
+            // 2D extraction path stays a pure block scan.
+            if (BimSupport.IsBimAvailable)
+            {
+                BimSupport.DumpModelSpaceDiagnostic(tr, db);
+
+                foreach (ObjectId id in ms)
+                {
+                    var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                    if (ent == null) continue;
+                    if (ent is BlockReference) continue;   // already handled above
+
+                    var bim = BimSupport.TryReadEntity(id);
+                    if (bim == null) continue;
+                    // Stable identity: prefer GlobalGuid (BIM Room/Space) else
+                    // entity Handle (any BIM-classified solid).
+                    if (string.IsNullOrEmpty(bim.GlobalGuid))
+                        bim.GlobalGuid = "h" + ent.Handle.Value.ToString("X");
+
+                    payload.Objects.Add(new ObjectSignal
+                    {
+                        Group1Identity = new Group1Identity
+                        {
+                            NativeId          = bim.GlobalGuid,
+                            NativeIdType      = "bim_guid",
+                            NativeIdStability = "stable_bim_guid",
+                            IdentityState     = "raw",
+                            LinkState         = "unlinked",
+                            IsDefinition      = false,
+                            DefinitionId      = ent.Handle.Value.ToString("X"),
+                            InstanceId        = ent.Handle.Value.ToString("X")
+                        },
+                        Group2Naming = new Group2Naming
+                        {
+                            VisibleLabel          = bim.Name ?? ent.GetRXClass().Name,
+                            DefinitionName        = bim.Category ?? ent.GetRXClass().Name,
+                            LayerOrTagName        = ent.Layer,
+                            SceneOrViewName       = "Model",
+                            NamingOrigin          = "bim_classification"
+                        },
+                        Group3Spatial = new Group3Spatial
+                        {
+                            SpatialPosition = TryEntityPosition(ent),
+                            ContainerType   = "bim_object",
+                            PackageHint     = bim.Category?.ToLowerInvariant()
+                        },
+                        Group4Geometry = new Group4Geometry
+                        {
+                            Units        = "mm",
+                            BoundingBox  = TryBoundingBox(ent),
+                            GeometryType = ent.GetRXClass().Name
+                        },
+                        Group5Classification = new Group5Classification
+                        {
+                            NativeCategory   = "bim_object",
+                            NativeType       = bim.Category ?? bim.IfcClass ?? ent.GetRXClass().Name,
+                            IfcClass         = bim.IfcClass,
+                            RenovationStatus = "unknown",
+                            StructuralFlag   = "unknown"
+                        },
+                        Group6Metadata = new Group6Metadata
+                        {
+                            MetadataFormat = bim.Properties != null ? "bim_property_set" : "xdata",
+                            BimProperties  = BuildBimPropertiesFromBimOnly(bim.Properties)
+                        },
+                        Group7Source  = NewGroup7(docContext),
+                        Group8Quality = new Group8Quality
+                        {
+                            ElementTypeOrigin    = "native",
+                            RoomOrigin           = "unknown",
+                            AreaOrigin           = "calculated",
+                            ClassificationOrigin = "native",   // BIM classification is authoritative
+                            NamingConfidence     = string.IsNullOrEmpty(bim.Name) ? "medium" : "strong",
+                            StableIdConfidence   = "host_native",   // BIM GlobalGuid > our XDATA UUID
+                            OverallSignalQuality = "high"
+                        }
+                    });
+                }
+            }
+        }
+
+        // ── BIM-entity helpers (Customer feedback #10) ──────────────────────────────
+
+        private static SpatialPosition TryEntityPosition(Entity ent)
+        {
+            try
+            {
+                var ext = ent.GeometricExtents;
+                return new SpatialPosition
+                {
+                    X    = (ext.MinPoint.X + ext.MaxPoint.X) / 2.0,
+                    Y    = (ext.MinPoint.Y + ext.MaxPoint.Y) / 2.0,
+                    Z    = (ext.MinPoint.Z + ext.MaxPoint.Z) / 2.0,
+                    Unit = "mm"
+                };
+            }
+            catch
+            {
+                return new SpatialPosition { X = 0, Y = 0, Z = 0, Unit = "mm" };
+            }
+        }
+
+        private static BimProperties BuildBimPropertiesFromBimOnly(Dictionary<string, string>? bimProps)
+        {
+            var props = new BimProperties();
+            if (bimProps != null) FoldIntoProps(bimProps, props);
+            return props;
         }
 
         private static Dictionary<string, string>? ReadAttributes(Transaction tr, BlockReference br)
@@ -417,47 +528,34 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
 
         /// <summary>
         /// Customer feedback #10 — primary room extraction path on BIM hosts.
-        /// Walks ModelSpace and attempts to wrap each entity as a Bricscad.Bim
-        /// BIMRoom (via BimSupport reflection). Each successful wrap becomes a
-        /// RoomSignal with a stable_bim_guid identity. Returns the number of BIM
-        /// rooms found so the caller can decide whether to also run the polyline
-        /// fallback for 2D-only drawings.
+        /// Calls BIMRoom.GetAllRooms(db) static method to enumerate every BIM
+        /// Room/Space in the drawing. Each becomes a RoomSignal with the room's
+        /// stable handle as native_id and BIM-native name/number/area. Returns
+        /// count so caller can decide whether to run the polyline fallback.
         /// </summary>
         private static int ExtractBimRooms(Transaction tr, Database db, ExtractionPayload payload)
         {
             if (!BimSupport.IsBimAvailable) return 0;
-
-            int found = 0;
-            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-            var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-
-            foreach (ObjectId id in ms)
+            var rooms = BimSupport.EnumerateRooms(db);
+            foreach (var r in rooms)
             {
-                var bim = BimSupport.TryReadEntity(id);
-                if (bim == null || string.IsNullOrEmpty(bim.GlobalGuid)) continue;
-
-                // Layer/handle are still useful even when BIM gives us a name+guid.
-                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent == null) continue;
-
                 payload.Rooms.Add(new RoomSignal
                 {
-                    NativeId         = bim.GlobalGuid,
-                    RawName          = bim.Name,
-                    LayerOrTag       = ent.Layer,
-                    BoundaryArea     = bim.Area,
+                    NativeId         = "h" + r.ObjectHandleHex,
+                    RawName          = r.Name ?? r.Number,
+                    LayerOrTag       = null,            // BIM rooms aren't on a CAD layer
+                    BoundaryArea     = r.AreaSqm,
                     Volume           = null,
                     Height           = null,
                     Unit             = "sqm",
                     IsClosedBoundary = true,
-                    ZoneNumber       = null,
-                    ZoneCategory     = bim.Category,
+                    ZoneNumber       = r.Number,
+                    ZoneCategory     = r.Department,
                     ContainedObjectNativeIds = null,
                     AirenoosRef      = null
                 });
-                found++;
             }
-            return found;
+            return rooms.Count;
         }
 
         private static void ExtractRoomsFromPolylines(Transaction tr, Database db, ExtractionPayload payload)
