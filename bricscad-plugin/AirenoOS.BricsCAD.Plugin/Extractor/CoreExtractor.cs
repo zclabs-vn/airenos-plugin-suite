@@ -35,7 +35,11 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             {
                 ExtractLayerTable(tr, db, payload);
                 ExtractObjects(tr, db, payload, docContext);
-                ExtractRoomsFromPolylines(tr, db, payload);
+                // Customer feedback #10 — prefer BIM Room/Space entities when the
+                // host has the BIM module active. Polylines are the legacy 2D
+                // fallback used only when no BIM rooms are found in ModelSpace.
+                int bimRooms = ExtractBimRooms(tr, db, payload);
+                if (bimRooms == 0) ExtractRoomsFromPolylines(tr, db, payload);
                 DetectCollisions(payload);
 
                 payload.Summary.TotalObjects    = payload.Objects.Count;
@@ -185,7 +189,10 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
         {
             SourceSoftware        = "bricscad",
             SourceSoftwareVersion = ctx.SourceSoftwareVersion,
-            SourceSoftwareType    = "2d_cad",
+            // Customer feedback #10 — flag BIM-licensed hosts so the MCP server
+            // can route the payload through its BIM pipeline. BimSupport caches
+            // the answer (RUNASLEVEL lookup happens once per session).
+            SourceSoftwareType    = BimSupport.IsBimAvailable ? "bricsCAD_bim" : "2d_cad",
             PluginVersion         = "1.0.2",
             FileNameHash          = ctx.FileNameHash,
             FileNameDisplay       = ctx.FileNameDisplay,
@@ -215,6 +222,15 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 // Brian #8: slot 6 carries the label the user saw before the last writeback.
                 var previousLabel = XdataHelper.ReadField(br, fieldIndex: 6);
 
+                // Customer feedback #10 — when BIM module is active, prefer the BIM
+                // entity's GlobalGuid + property sets over our XDATA UUID and block
+                // attribute scan. BimSupport.TryReadEntity returns null for blocks
+                // that aren't BIM-classified, so non-BIM blocks fall through
+                // unchanged (verified by reflection-only API access).
+                var bim = BimSupport.TryReadEntity(id);
+                var bimNativeId   = bim?.GlobalGuid;
+                var preferBimId   = !string.IsNullOrEmpty(bimNativeId);
+
                 var btr = (BlockTableRecord)tr.GetObject(br.BlockTableRecord, OpenMode.ForRead);
 
                 var fileName = string.IsNullOrEmpty(db.Filename) ? null : System.IO.Path.GetFileNameWithoutExtension(db.Filename);
@@ -223,9 +239,11 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 {
                     Group1Identity = new Group1Identity
                     {
-                        NativeId          = string.IsNullOrEmpty(nativeId) ? null : nativeId,
-                        NativeIdType      = "xdata_uuid",
-                        NativeIdStability = "stable",
+                        NativeId          = preferBimId
+                                              ? bimNativeId
+                                              : (string.IsNullOrEmpty(nativeId) ? null : nativeId),
+                        NativeIdType      = preferBimId ? "bim_guid"        : "xdata_uuid",
+                        NativeIdStability = preferBimId ? "stable_bim_guid" : "stable",
                         IdentityState     = identityState,
                         LinkState         = string.IsNullOrEmpty(backpackId) ? "unlinked" : "linked",
                         IsDefinition      = false,
@@ -265,15 +283,18 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                     },
                     Group5Classification = new Group5Classification
                     {
-                        NativeCategory   = "block",
-                        NativeType       = btr.Name,
+                        NativeCategory   = preferBimId ? "bim_object" : "block",
+                        NativeType       = bim?.Category ?? bim?.IfcClass ?? btr.Name,
+                        IfcClass         = bim?.IfcClass,
                         RenovationStatus = "unknown",
                         StructuralFlag   = "unknown"
                     },
                     Group6Metadata = new Group6Metadata
                     {
-                        MetadataFormat = "xdata",
-                        BimProperties  = BuildBimProperties(btr, br, tr)
+                        // bim_property_set when we successfully read BIM-side properties;
+                        // legacy xdata when only XDATA attributes were available.
+                        MetadataFormat = bim?.Properties != null ? "bim_property_set" : "xdata",
+                        BimProperties  = BuildBimProperties(btr, br, tr, bim?.Properties)
                     },
                     Group7Source = NewGroup7(docContext),
                     Group8Quality = new Group8Quality
@@ -308,53 +329,70 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
         // Surface what BIM-style metadata we can extract from a block:
         //  • description from the block definition's "Description" field (BLOCK command)
         //  • manufacturer / model / phase from attributes whose tag matches a known alias
+        //  • bimPropertySets — flat dict pulled from BricsCAD's BIM property sets via
+        //    BimSupport (customer feedback #10). When present, it overrides any attribute-
+        //    derived field with the BIM-native value because property sets are the
+        //    authoritative source on a BIM-classified entity.
         // Returns a BimProperties bag with whatever fields were found (others stay null).
-        private static BimProperties BuildBimProperties(BlockTableRecord btr, BlockReference br, Transaction tr)
+        private static BimProperties BuildBimProperties(
+            BlockTableRecord btr, BlockReference br, Transaction tr,
+            Dictionary<string, string>? bimPropertySets)
         {
             var props = new BimProperties();
 
             if (!string.IsNullOrWhiteSpace(btr.Comments))
                 props.Description = btr.Comments.Trim();
 
+            // 1. Block attributes (existing logic).
             var attrs = ReadAttributes(tr, br);
-            if (attrs != null)
-            {
-                foreach (var kv in attrs)
-                {
-                    var tag = kv.Key.ToUpperInvariant();
-                    switch (tag)
-                    {
-                        case "MFR":
-                        case "MFG":
-                        case "MAKER":
-                        case "MANUFACTURER":
-                            props.Manufacturer ??= kv.Value;
-                            break;
-                        case "MODEL":
-                        case "MFR_MODEL":
-                        case "MFG_MODEL":
-                        case "MODEL_NO":
-                        case "MODEL_NUMBER":
-                            props.ManufacturerModel ??= kv.Value;
-                            break;
-                        case "PHASE":
-                        case "WORK_PHASE":
-                            props.Phase ??= kv.Value;
-                            break;
-                        case "MATERIAL":
-                        case "MAT":
-                        case "MATERIAL_NAME":
-                            props.MaterialName ??= kv.Value;
-                            break;
-                        case "FIRE_RATING":
-                        case "FIRE":
-                            props.FireRating ??= kv.Value;
-                            break;
-                    }
-                }
-            }
+            if (attrs != null) FoldIntoProps(attrs, props);
+
+            // 2. BIM property sets — overlay on top so they win where they overlap.
+            if (bimPropertySets != null) FoldIntoProps(bimPropertySets, props);
 
             return props;
+        }
+
+        private static void FoldIntoProps(Dictionary<string, string> source, BimProperties props)
+        {
+            foreach (var kv in source)
+            {
+                var tag = kv.Key.ToUpperInvariant();
+                switch (tag)
+                {
+                    case "MFR":
+                    case "MFG":
+                    case "MAKER":
+                    case "MANUFACTURER":
+                        props.Manufacturer = kv.Value;
+                        break;
+                    case "MODEL":
+                    case "MFR_MODEL":
+                    case "MFG_MODEL":
+                    case "MODEL_NO":
+                    case "MODEL_NUMBER":
+                        props.ManufacturerModel = kv.Value;
+                        break;
+                    case "PHASE":
+                    case "WORK_PHASE":
+                        props.Phase = kv.Value;
+                        break;
+                    case "MATERIAL":
+                    case "MAT":
+                    case "MATERIAL_NAME":
+                        props.MaterialName = kv.Value;
+                        break;
+                    case "FIRE_RATING":
+                    case "FIRE":
+                        props.FireRating = kv.Value;
+                        break;
+                    case "DESCRIPTION":
+                    case "DESC":
+                        if (string.IsNullOrWhiteSpace(props.Description))
+                            props.Description = kv.Value;
+                        break;
+                }
+            }
         }
 
         private static BoundingBox? TryBoundingBox(Entity ent)
@@ -375,7 +413,52 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             }
         }
 
-        // ── Rooms (inferred from closed polylines) ──────────────────────────────────
+        // ── Rooms (BIM Room/Space when available, polylines as 2D fallback) ─────
+
+        /// <summary>
+        /// Customer feedback #10 — primary room extraction path on BIM hosts.
+        /// Walks ModelSpace and attempts to wrap each entity as a Bricscad.Bim
+        /// BIMRoom (via BimSupport reflection). Each successful wrap becomes a
+        /// RoomSignal with a stable_bim_guid identity. Returns the number of BIM
+        /// rooms found so the caller can decide whether to also run the polyline
+        /// fallback for 2D-only drawings.
+        /// </summary>
+        private static int ExtractBimRooms(Transaction tr, Database db, ExtractionPayload payload)
+        {
+            if (!BimSupport.IsBimAvailable) return 0;
+
+            int found = 0;
+            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+
+            foreach (ObjectId id in ms)
+            {
+                var bim = BimSupport.TryReadEntity(id);
+                if (bim == null || string.IsNullOrEmpty(bim.GlobalGuid)) continue;
+
+                // Layer/handle are still useful even when BIM gives us a name+guid.
+                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                if (ent == null) continue;
+
+                payload.Rooms.Add(new RoomSignal
+                {
+                    NativeId         = bim.GlobalGuid,
+                    RawName          = bim.Name,
+                    LayerOrTag       = ent.Layer,
+                    BoundaryArea     = bim.Area,
+                    Volume           = null,
+                    Height           = null,
+                    Unit             = "sqm",
+                    IsClosedBoundary = true,
+                    ZoneNumber       = null,
+                    ZoneCategory     = bim.Category,
+                    ContainedObjectNativeIds = null,
+                    AirenoosRef      = null
+                });
+                found++;
+            }
+            return found;
+        }
 
         private static void ExtractRoomsFromPolylines(Transaction tr, Database db, ExtractionPayload payload)
         {
