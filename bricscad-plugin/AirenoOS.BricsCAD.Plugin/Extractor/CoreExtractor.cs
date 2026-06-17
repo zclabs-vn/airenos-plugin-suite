@@ -67,31 +67,50 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
         }
 
         /// <summary>
-        /// Brian #11 — best-effort probe of the BricsCAD host. SystemVariable names changed
-        /// across versions (V24/V25/V26), so every read is wrapped: an unknown name just
-        /// leaves that field null/false instead of failing the whole extraction.
-        ///   BIMLIC       → "1" when BIM features are licensed and loaded
-        ///   PRODUCT      → human-readable product family ("BricsCAD")
-        ///   BCADPRODUCT  → product variant ("Lite", "Pro", "BIM", "Mechanical", "Ultimate")
+        /// Brian #11 / customer feedback #10 — probe the BricsCAD host so the MCP
+        /// server knows whether BIM-tagged work can be served by this client.
+        ///
+        /// Detection is driven by RUNASLEVEL (per Bricsys help — SV_runaslevel):
+        ///   0 = Lite,  1 = Pro,  3 = BIM,  4 = Mechanical,  5 = Ultimate.
+        /// LICFLAGS mirrors RUNASLEVEL after restart, so RUNASLEVEL alone is the
+        /// canonical source. Earlier code probed a "BIMLIC" sysvar that doesn't
+        /// exist in any documented BricsCAD version — verified 2026-06-17 against
+        /// V25 (FullVersion 25.2.10, registry RUNASLEVEL=5) the legacy probe
+        /// silently returned bim_module_available=false on a known-Ultimate host.
+        ///
+        /// PRODUCT name read separately (BricsCAD always returns "BricsCAD"; kept
+        /// for forward-compat if Bricsys ever forks the binary).
         /// </summary>
         private static HostEnvironment ProbeHostEnvironment()
         {
             var env = new HostEnvironment();
-            try { env.ProductName    = Application.GetSystemVariable("PRODUCT")     as string; } catch { }
-            try { env.ProductVariant = Application.GetSystemVariable("BCADPRODUCT") as string; } catch { }
+            try { env.ProductName = Application.GetSystemVariable("PRODUCT") as string; } catch { }
             try
             {
-                var lic = Application.GetSystemVariable("BIMLIC");
-                env.BimModuleAvailable = lic switch
+                var raw = Application.GetSystemVariable("RUNASLEVEL");
+                int? level = raw switch
                 {
-                    short s => s != 0,
-                    int i   => i != 0,
-                    long l  => l != 0,
-                    string str => str == "1" || string.Equals(str, "true", StringComparison.OrdinalIgnoreCase),
-                    _       => false
+                    short s => s,
+                    int   i => i,
+                    long  l => (int)l,
+                    string s when int.TryParse(s, out var n) => n,
+                    _ => (int?)null
                 };
+                env.RunAsLevel = level;
+                env.ProductVariant = level switch
+                {
+                    0 => "Lite",
+                    1 => "Pro",
+                    3 => "BIM",
+                    4 => "Mechanical",
+                    5 => "Ultimate",
+                    _ => null
+                };
+                // 3 = BIM, 5 = Ultimate (Ultimate is a superset that includes BIM).
+                // Mechanical (4) is a parallel module, not a BIM superset.
+                env.BimModuleAvailable = level == 3 || level == 5;
             }
-            catch { env.BimModuleAvailable = false; }
+            catch { /* RUNASLEVEL missing on this version → leave defaults */ }
             return env;
         }
 

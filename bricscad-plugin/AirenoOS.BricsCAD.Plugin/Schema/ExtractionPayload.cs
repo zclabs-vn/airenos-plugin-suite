@@ -92,9 +92,14 @@ namespace AirenoOS.BricsCAD.Plugin.Schema
     /// </summary>
     internal class HostEnvironment
     {
-        [JsonPropertyName("product_name")]        public string? ProductName       { get; set; }
-        [JsonPropertyName("product_variant")]     public string? ProductVariant    { get; set; }
-        [JsonPropertyName("bim_module_available")] public bool   BimModuleAvailable { get; set; }
+        [JsonPropertyName("product_name")]         public string? ProductName        { get; set; }
+        [JsonPropertyName("product_variant")]      public string? ProductVariant     { get; set; }
+        [JsonPropertyName("bim_module_available")] public bool    BimModuleAvailable { get; set; }
+        // RUNASLEVEL sysvar value at extraction time (per RUNASLEVEL doc): 0=Lite,
+        // 1=Pro, 3=BIM, 4=Mechanical, 5=Ultimate. Null when the sysvar isn't
+        // exposed by this BricsCAD version. ProductVariant + BimModuleAvailable are
+        // both derived from this.
+        [JsonPropertyName("run_as_level")]         public int?    RunAsLevel         { get; set; }
     }
 
     internal class ExtractionSummary
