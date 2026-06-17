@@ -167,7 +167,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             SourceSoftware        = "bricscad",
             SourceSoftwareVersion = ctx.SourceSoftwareVersion,
             SourceSoftwareType    = "2d_cad",
-            PluginVersion         = "1.0.3",
+            PluginVersion         = "1.0.2",
             FileNameHash          = ctx.FileNameHash,
             FileNameDisplay       = ctx.FileNameDisplay,
             DocumentProjectToken  = ctx.DocumentProjectToken,

@@ -7,7 +7,7 @@
     <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
     <AssemblyName>AirenoOS.BricsCAD.Plugin</AssemblyName>
     <RootNamespace>AirenoOS.BricsCAD.Plugin</RootNamespace>
-    <Version>1.0.3</Version>
+    <Version>1.0.2</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
