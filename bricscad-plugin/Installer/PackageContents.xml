@@ -1,14 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   BricsCAD plugin manifest. BricsCAD scans every *.bundle folder under
-  C:\Program Files\Bricsys\ApplicationPlugins\ and auto-NETLOADs the
-  ComponentEntry whose RuntimeRequirements match the host.
+  %ProgramFiles%\Bricsys\ApplicationPlugins\ on startup and auto-NETLOADs each
+  ComponentEntry whose RuntimeRequirements match the running host.
 
-  Single Components block — exact shape v1.0.0 shipped with, which BricsCAD
-  V26 already auto-loaded successfully. The ModuleName points at the V25
-  (net48) subfolder because V25 hosts plugins on .NET Framework 4.x CLR;
-  V26 (net8) cannot load that DLL and must be tested separately once V25
-  bundle scanning is confirmed working.
+  Ship two ComponentEntry rows side-by-side in a SINGLE Components block:
+
+    Contents/V25/AirenoOS.BricsCAD.Plugin.dll   → net48 (works on V25's CLR)
+    Contents/V26/AirenoOS.BricsCAD.Plugin.dll   → net8  (works on V26's CLR)
+
+  We deliberately do NOT use SeriesMin/SeriesMax — registry shows BricsCAD V25
+  reports FullVersion="25.2.10" (not "V25"), so the documented "V25"/"V26"
+  series strings don't match and V25 silently rejects the bundle. Without the
+  filter, V25 tries both ComponentEntries: the net48 entry NETLOADs and
+  registers the AIRENO_* commands; the net8 entry fails with a benign CLR
+  mismatch in the log. V26 does the inverse. Each version ends up with exactly
+  the right DLL loaded, no version negotiation required.
+
+  The <Commands> block registers AIRENO_CONNECT/AIRENO_EXTRACT/AIRENO_WRITEBACK
+  names with the command line at bundle-scan time so they're known before the
+  DLL is JIT-loaded.
 -->
 <ApplicationPackage
     SchemaVersion="1.0"
@@ -21,11 +32,35 @@
 
   <Components>
     <RuntimeRequirements OS="Win64" Platform="BricsCAD" />
+
+    <!-- BricsCAD V25 host — .NET Framework 4.x CLR loads this; V26 ignores it (CLR mismatch). -->
     <ComponentEntry
-        AppName="AirenoOS"
+        AppName="AirenoOS.V25"
+        Version="1.0.3"
         ModuleName="./Contents/V25/AirenoOS.BricsCAD.Plugin.dll"
-        AppDescription="AirenoOS metadata sync"
+        AppDescription="AirenoOS metadata sync (V25)"
         LoadOnAppearance="True"
-        LoadOnCommandInvocation="False" />
+        LoadOnCommandInvocation="True">
+      <Commands GroupName="AIRENO">
+        <Command Local="AIRENO_CONNECT"   Global="AIRENO_CONNECT"   />
+        <Command Local="AIRENO_EXTRACT"   Global="AIRENO_EXTRACT"   />
+        <Command Local="AIRENO_WRITEBACK" Global="AIRENO_WRITEBACK" />
+      </Commands>
+    </ComponentEntry>
+
+    <!-- BricsCAD V26 host — .NET 8 CLR loads this; V25 ignores it (CLR mismatch). -->
+    <ComponentEntry
+        AppName="AirenoOS.V26"
+        Version="1.0.3"
+        ModuleName="./Contents/V26/AirenoOS.BricsCAD.Plugin.dll"
+        AppDescription="AirenoOS metadata sync (V26)"
+        LoadOnAppearance="True"
+        LoadOnCommandInvocation="True">
+      <Commands GroupName="AIRENO">
+        <Command Local="AIRENO_CONNECT"   Global="AIRENO_CONNECT"   />
+        <Command Local="AIRENO_EXTRACT"   Global="AIRENO_EXTRACT"   />
+        <Command Local="AIRENO_WRITEBACK" Global="AIRENO_WRITEBACK" />
+      </Commands>
+    </ComponentEntry>
   </Components>
 </ApplicationPackage>

@@ -19,6 +19,7 @@ obj/
 *.wixpdb
 **/Installer/build/install*.log
 **/Installer/staging/
+.wix/
 
 # Visual Studio
 .vs/

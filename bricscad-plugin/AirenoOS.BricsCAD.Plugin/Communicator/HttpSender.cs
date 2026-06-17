@@ -75,10 +75,13 @@ namespace AirenoOS.BricsCAD.Plugin.Communicator
             {
                 (endpoint, token) = ConnectionConfig.Load(db);
             }
-            catch
+            catch (Exception ex)
             {
+                LogError($"ConnectionConfig.Load threw: {ex.GetType().Name}: {ex.Message}");
                 return;
             }
+
+            SaveHandler.SessionLog($"PostAsync: endpoint='{endpoint}' tokenLen={token?.Length ?? 0}");
 
             if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(token))
             {

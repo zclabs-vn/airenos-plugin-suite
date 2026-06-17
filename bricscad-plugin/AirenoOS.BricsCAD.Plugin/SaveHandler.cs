@@ -24,34 +24,60 @@ namespace AirenoOS.BricsCAD.Plugin
         {
             if (PluginApplication.IsShuttingDown) return;
 
+            // Trace every stage so V25 silent failures stop being invisible. Logged to
+            // %TEMP%\AirenoOS\session_end.log (also used by OnSessionEnd — same file is fine,
+            // entries are timestamped and tagged).
+            SessionLog($"OnSaveComplete entered (manualMode={manualMode})");
+
             try
             {
-                // Ensure document has a project token
                 ProjectTokenManager.EnsureProjectToken(doc.Database);
+                SessionLog("EnsureProjectToken OK");
 
-                // Manual EXTRACT: assign XDATA-stored UUID to any tracked entity missing one
-                // (Brian #7 — extended from blocks to polylines/hatches/dimensions).
                 if (manualMode)
                 {
                     EnsureNativeIds(doc.Database);
+                    SessionLog("EnsureNativeIds OK");
                 }
 
-                // Layer 1 — core extraction (synchronous, fast)
                 var payload = Extractor.CoreExtractor.Extract(doc, trigger: manualMode ? "manual_command" : "on_save");
+                SessionLog($"CoreExtractor.Extract OK ({payload.Objects.Count} objects, {payload.Rooms.Count} rooms)");
 
-                // Layer 2 — extended signals (async, non-blocking)
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        ExtendedExtractor.Enrich(doc, payload);
+                        SessionLog("Task.Run started");
+                        try { ExtendedExtractor.Enrich(doc, payload); SessionLog("Enrich OK"); }
+                        catch (Exception enrichEx) { SessionLog($"Enrich threw (continuing): {enrichEx.GetType().Name}: {enrichEx.Message}"); }
+
+                        SessionLog("PostAsync starting");
                         await HttpSender.PostAsync(doc.Database, payload).ConfigureAwait(false);
+                        SessionLog("PostAsync returned");
+
                         await HttpSender.RetryPending(doc.Database).ConfigureAwait(false);
+                        SessionLog("RetryPending returned");
                     }
-                    catch { /* never crash BricsCAD */ }
+                    catch (Exception taskEx)
+                    {
+                        SessionLog($"Task.Run threw: {taskEx.GetType().Name}: {taskEx.Message}\n{taskEx.StackTrace}");
+                        var inner = taskEx.InnerException;
+                        int depth = 1;
+                        while (inner != null && depth < 5)
+                        {
+                            SessionLog($"  Inner[{depth}]: {inner.GetType().Name}: {inner.Message}");
+                            if (inner is System.IO.FileNotFoundException fnf)
+                                SessionLog($"    FileName: {fnf.FileName}\n    FusionLog: {fnf.FusionLog}");
+                            inner = inner.InnerException;
+                            depth++;
+                        }
+                    }
                 });
             }
-            catch { /* never crash BricsCAD */ }
+            catch (Exception ex)
+            {
+                SessionLog($"OnSaveComplete threw: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         /// <summary>
@@ -95,6 +121,16 @@ namespace AirenoOS.BricsCAD.Plugin
             catch (Exception ex)
             {
                 SessionLog($"OnSessionEnd threw: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                var inner = ex.InnerException;
+                int depth = 1;
+                while (inner != null && depth < 5)
+                {
+                    SessionLog($"  Inner[{depth}]: {inner.GetType().Name}: {inner.Message}");
+                    if (inner is System.IO.FileNotFoundException fnf)
+                        SessionLog($"    FileName: {fnf.FileName}\n    FusionLog: {fnf.FusionLog}");
+                    inner = inner.InnerException;
+                    depth++;
+                }
             }
         }
 

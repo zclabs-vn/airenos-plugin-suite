@@ -25,7 +25,7 @@
       Manufacturer="AirenoOS"
       Version="1.0.3.0"
       UpgradeCode="C3D1A5A2-AFE6-4F1A-9B0E-A1A2A3A4A5A6"
-      Scope="perMachine"
+      Scope="perUser"
       Compressed="yes"
       InstallerVersion="500">
 
@@ -82,20 +82,19 @@
             Message="Neither BricsCAD V25 nor V26 was detected in &quot;C:\Program Files\Bricsys\&quot;. Install BricsCAD first, then re-run this installer." />
 
     <!-- ───────────────────────────────────────────────────────────────────────
-         Install layout — bundle deploys to %ProgramFiles%\Bricsys\ApplicationPlugins\.
-         This is the canonical machine-wide path that v1.0.0 used and that V26
-         picked up at runtime; %APPDATA% (v1.0.2) and %ProgramData% (first try
-         of v1.0.3) failed silently on BricsCAD V25. ProgramFiles64Folder is
-         the lowest-common-denominator location all BricsCAD versions scan
-         during startup.
+         Install layout — per-user bundle under %LOCALAPPDATA%\Bricsys\ApplicationPlugins\.
+         Bundle autoloading on V25 doesn't work regardless of path (see
+         bricscad-v25-loader-quirks memory); we register the assembly via
+         HKCU\Software\Bricsys\BricsCAD\<ver>x64\en_US\Applications\AirenoOS so
+         the install location only has to be reachable by the LOADER path —
+         %LOCALAPPDATA% is per-user writable without admin/UAC.
 
          Two host-specific subfolders so each BricsCAD edition loads the DLL
          compiled for its CLR:
-           Contents/V25/  → .NET Framework 4.8 DLL  (BricsCAD V25 host)
-           Contents/V26/  → .NET 8 DLL              (BricsCAD V26 host)
-         PackageContents.xml gates each via RuntimeRequirements/SeriesMin+Max.
+           Contents/V25/  → .NET Framework 4.8 DLL + 9 NuGet System.* DLLs
+           Contents/V26/  → .NET 8 DLL (self-contained against net8 BCL)
          ─────────────────────────────────────────────────────────────────────── -->
-    <StandardDirectory Id="ProgramFiles64Folder">
+    <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="BricsysFolder" Name="Bricsys">
         <Directory Id="AppPluginsFolder" Name="ApplicationPlugins">
           <Directory Id="BundleFolder" Name="AirenoOS.BricsCAD.bundle">
@@ -188,14 +187,14 @@
         <RemoveFolder Id="RemoveV26Dir"       Directory="BundleV26SubFolder" On="uninstall" />
       </Component>
 
-      <!-- BricsCAD V25 host (.NET Framework 4.8) -->
-      <Component Id="C_PluginDllV25" Directory="BundleV25SubFolder">
-        <File
-            Id="F_PluginDllV25"
-            Name="AirenoOS.BricsCAD.Plugin.dll"
-            Source="$(var.PluginDllV25)"
-            KeyPath="yes" />
-      </Component>
+      <!-- BricsCAD V25 host (.NET Framework 4.8).
+           net48 builds aren't self-contained: System.Text.Json + 8 transitive
+           NuGet DLLs ship alongside the plugin DLL. Without these, BricsCAD V25
+           NETLOADs the plugin but HttpSender's static ctor throws
+           TypeInitializationException (verified 2026-06-16 in session_end.log)
+           and no payload ever leaves the host. <Files> globs every *.dll the
+           build emits into bin\x64\Release\net48\ (= Stage\V25 after copy). -->
+      <Files Directory="BundleV25SubFolder" Include="$(var.PluginDirV25)\*.dll" />
 
       <!-- BricsCAD V26 host (.NET 8) -->
       <Component Id="C_PluginDllV26" Directory="BundleV26SubFolder">
@@ -204,6 +203,45 @@
             Name="AirenoOS.BricsCAD.Plugin.dll"
             Source="$(var.PluginDllV26)"
             KeyPath="yes" />
+      </Component>
+
+      <!-- ───────────────────────────────────────────────────────────────────
+           Registry-based demand-load (Brian #10 follow-up).
+
+           PackageContents.xml-driven bundle autoloading silently fails on
+           BricsCAD V25 (see bricscad-v25-loader-quirks memory). We register
+           the .NET assembly via the AutoCAD-style Applications registry hive,
+           which BricsCAD reads at startup and NETLOADs without going through
+           bundle manifest parsing.
+
+             LOADCTRLS = 14 (0x0E) → load at startup + on command + on demand
+             MANAGED   = 1        → .NET assembly (not native ARX)
+             LOADER    → absolute path to the version-specific DLL
+
+           Per-user install: HKCU not HKLM (no admin), LOADER under
+           [LocalAppDataFolder] = %LOCALAPPDATA%. BricsCAD's HKLM Applications
+           scan also reads HKCU (mirrors AutoCAD behaviour); verified working
+           against V25 2026-06-17.
+
+           Conditional on the corresponding BRICSCAD_VXX_FOUND search property
+           so we don't litter the registry of hosts that aren't installed.
+           ─────────────────────────────────────────────────────────────────── -->
+      <Component Id="C_RegV25" Directory="BundleV25SubFolder" Condition="BRICSCAD_V25_FOUND">
+        <RegistryKey Root="HKCU" Key="Software\Bricsys\BricsCAD\V25x64\en_US\Applications\AirenoOS">
+          <RegistryValue Type="string"  Name="DESCRIPTION" Value="AirenoOS metadata sync (V25)" />
+          <RegistryValue Type="integer" Name="LOADCTRLS"   Value="14" />
+          <RegistryValue Type="string"  Name="LOADER"      Value="[LocalAppDataFolder]Bricsys\ApplicationPlugins\AirenoOS.BricsCAD.bundle\Contents\V25\AirenoOS.BricsCAD.Plugin.dll" />
+          <RegistryValue Type="integer" Name="MANAGED"     Value="1" KeyPath="yes" />
+        </RegistryKey>
+      </Component>
+
+      <Component Id="C_RegV26" Directory="BundleV26SubFolder" Condition="BRICSCAD_V26_FOUND">
+        <RegistryKey Root="HKCU" Key="Software\Bricsys\BricsCAD\V26x64\en_US\Applications\AirenoOS">
+          <RegistryValue Type="string"  Name="DESCRIPTION" Value="AirenoOS metadata sync (V26)" />
+          <RegistryValue Type="integer" Name="LOADCTRLS"   Value="14" />
+          <RegistryValue Type="string"  Name="LOADER"      Value="[LocalAppDataFolder]Bricsys\ApplicationPlugins\AirenoOS.BricsCAD.bundle\Contents\V26\AirenoOS.BricsCAD.Plugin.dll" />
+          <RegistryValue Type="integer" Name="MANAGED"     Value="1" KeyPath="yes" />
+        </RegistryKey>
       </Component>
     </ComponentGroup>
   </Fragment>
