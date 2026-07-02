@@ -25,8 +25,8 @@ namespace AirenoOS.AutoCAD.Plugin.Communicator
         {
             // AutoCAD 2024 runs on .NET Framework 4.8 where ServicePointManager defaults
             // can leave TLS 1.0 enabled and TLS 1.3 disabled — Cloudflare-fronted endpoints
-            // (mock-mcp.demo-hub.dev) reject those. Force-enable TLS 1.2 + 1.3 (1.3 const
-            // exists from .NETFx 4.8) so handshakes succeed across both target frameworks.
+            // reject those. Force-enable TLS 1.2 + 1.3 (1.3 const exists from .NETFx 4.8)
+            // so handshakes succeed across both target frameworks.
             try
             {
                 ServicePointManager.SecurityProtocol |=

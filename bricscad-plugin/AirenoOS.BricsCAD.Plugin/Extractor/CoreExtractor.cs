@@ -193,7 +193,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
             // can route the payload through its BIM pipeline. BimSupport caches
             // the answer (RUNASLEVEL lookup happens once per session).
             SourceSoftwareType    = BimSupport.IsBimAvailable ? "bricsCAD_bim" : "2d_cad",
-            PluginVersion         = "1.0.2",
+            PluginVersion         = "1.0.3",
             FileNameHash          = ctx.FileNameHash,
             FileNameDisplay       = ctx.FileNameDisplay,
             DocumentProjectToken  = ctx.DocumentProjectToken,

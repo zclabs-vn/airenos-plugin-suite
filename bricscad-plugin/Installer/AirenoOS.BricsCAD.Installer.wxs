@@ -23,7 +23,7 @@
   <Package
       Name="AirenoOS BricsCAD Plugin"
       Manufacturer="AirenoOS"
-      Version="1.0.2.0"
+      Version="1.0.3.0"
       UpgradeCode="C3D1A5A2-AFE6-4F1A-9B0E-A1A2A3A4A5A6"
       Scope="perUser"
       Compressed="yes"
@@ -43,8 +43,8 @@
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Friendly product info shown in Add/Remove Programs -->
-    <Property Id="ARPHELPLINK" Value="https://zclabs.vn" />
-    <Property Id="ARPURLINFOABOUT" Value="https://zclabs.vn" />
+    <Property Id="ARPHELPLINK" Value="https://airenos.io" />
+    <Property Id="ARPURLINFOABOUT" Value="https://airenos.io" />
 
     <!-- ───────────────────────────────────────────────────────────────────────
          BricsCAD detection — Brian #10

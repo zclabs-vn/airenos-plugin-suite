@@ -123,7 +123,7 @@ namespace AirenoOS.BricsCAD.Plugin.Schema
         [JsonPropertyName("source_software")]         public string  SourceSoftware        { get; set; } = "bricscad";
         [JsonPropertyName("source_software_version")] public string  SourceSoftwareVersion { get; set; } = string.Empty;
         [JsonPropertyName("source_software_type")]    public string  SourceSoftwareType    { get; set; } = "2d_cad";
-        [JsonPropertyName("plugin_version")]          public string  PluginVersion         { get; set; } = "1.0.2";
+        [JsonPropertyName("plugin_version")]          public string  PluginVersion         { get; set; } = "1.0.3";
         [JsonPropertyName("file_name_hash")]          public string  FileNameHash          { get; set; } = string.Empty;
         [JsonPropertyName("file_name_display")]       public string? FileNameDisplay       { get; set; }
         [JsonPropertyName("document_project_token")]  public string  DocumentProjectToken  { get; set; } = string.Empty;

@@ -15,7 +15,7 @@
   <Package
       Name="AirenoOS AutoCAD Plugin"
       Manufacturer="AirenoOS"
-      Version="1.0.2"
+      Version="1.0.3"
       UpgradeCode="F9E8D7C6-B5A4-4321-9876-543210FEDCBA"
       Scope="perUser"
       Compressed="yes"
