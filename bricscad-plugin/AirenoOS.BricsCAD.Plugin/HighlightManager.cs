@@ -217,26 +217,35 @@ namespace AirenoOS.BricsCAD.Plugin
 
         private static void ClearHighlightState(Document doc)
         {
-            if (_highlightedIds.Count == 0) return;
-            try
+            // Unhighlight each entity we lit up via Entity.Highlight().
+            if (_highlightedIds.Count > 0)
             {
-                using (var tr = doc.Database.TransactionManager.StartTransaction())
+                try
                 {
-                    foreach (var id in _highlightedIds)
+                    using (var tr = doc.Database.TransactionManager.StartTransaction())
                     {
-                        try
+                        foreach (var id in _highlightedIds)
                         {
-                            var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                            if (ent != null && !ent.IsErased) ent.Unhighlight();
+                            try
+                            {
+                                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                                if (ent != null && !ent.IsErased) ent.Unhighlight();
+                            }
+                            catch { }
                         }
-                        catch { }
+                        tr.Commit();
                     }
-                    tr.Commit();
                 }
-                try { doc.Editor.UpdateScreen(); } catch { }
+                catch { }
+                _highlightedIds.Clear();
             }
-            catch { }
-            _highlightedIds.Clear();
+
+            // Clear the pick-first / implied selection so a subsequent user command
+            // (ERASE, MOVE, …) doesn't accidentally act on objects the user thinks
+            // are no longer selected. Runs unconditionally — even if _highlightedIds
+            // was empty, an earlier SetImpliedSelection may have set the pick-first set.
+            try { doc.Editor.SetImpliedSelection(Array.Empty<ObjectId>()); } catch { }
+            try { doc.Editor.UpdateScreen(); } catch { }
         }
 
         private static void AddOverlayForEntity(Entity ent)

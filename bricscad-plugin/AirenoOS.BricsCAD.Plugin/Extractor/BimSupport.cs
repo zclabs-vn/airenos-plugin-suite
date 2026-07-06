@@ -90,7 +90,7 @@ namespace AirenoOS.BricsCAD.Plugin.Extractor
                 var isUnclass = InvokeStatic<bool>(_bimClassificationType, "IsUnclassified", new object[] { entId });
                 if (isUnclass) return null;
 
-                // localName=false → canonical English name ("Wall" not "Bức tường").
+                // localName=false → canonical English name (locale-independent).
                 var classification = InvokeStatic<string>(_bimClassificationType, "GetClassificationName", new object[] { entId, false });
                 if (string.IsNullOrEmpty(classification)) return null;
 

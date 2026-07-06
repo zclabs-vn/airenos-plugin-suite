@@ -11,8 +11,8 @@
     ProductType="Application"
     Name="AirenoOS Plugin"
     Description="Extracts drawing metadata and syncs it with the AirenoOS MCP backend."
-    AppVersion="1.0.0"
-    FriendlyVersion="1.0.0"
+    AppVersion="1.0.4"
+    FriendlyVersion="1.0.4"
     Author="AirenoOS"
     AppNameSpace="airenos.io"
     ProductCode="{A1B2C3D4-E5F6-4A1B-9C2D-3E4F5A6B7C8D}"
@@ -27,7 +27,7 @@
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.3" SeriesMax="R24.3" />
     <ComponentEntry
         AppName="AirenoOS.AutoCAD.Plugin"
-        Version="1.0.0"
+        Version="1.0.4"
         ModuleName="./Contents/2024/AirenoOS.AutoCAD.Plugin.dll"
         LoadOnAutoCADStartup="True">
       <Commands GroupName="AIRENO">
@@ -43,7 +43,7 @@
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R25.0" />
     <ComponentEntry
         AppName="AirenoOS.AutoCAD.Plugin"
-        Version="1.0.0"
+        Version="1.0.4"
         ModuleName="./Contents/2025/AirenoOS.AutoCAD.Plugin.dll"
         LoadOnAutoCADStartup="True">
       <Commands GroupName="AIRENO">
@@ -59,7 +59,7 @@
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.1" SeriesMax="R25.1" />
     <ComponentEntry
         AppName="AirenoOS.AutoCAD.Plugin"
-        Version="1.0.0"
+        Version="1.0.4"
         ModuleName="./Contents/2026/AirenoOS.AutoCAD.Plugin.dll"
         LoadOnAutoCADStartup="True">
       <Commands GroupName="AIRENO">

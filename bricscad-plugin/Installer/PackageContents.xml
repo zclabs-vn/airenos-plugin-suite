@@ -23,7 +23,7 @@
 -->
 <ApplicationPackage
     SchemaVersion="1.0"
-    AppVersion="1.0.3"
+    AppVersion="1.0.4"
     Author="AirenoOS"
     Name="AirenoOS"
     Description="AirenoOS metadata sync — extracts blocks, layers, dimensions, text on save and POSTs to the MCP endpoint.">
@@ -36,7 +36,7 @@
     <!-- BricsCAD V25 host — .NET Framework 4.x CLR loads this; V26 ignores it (CLR mismatch). -->
     <ComponentEntry
         AppName="AirenoOS.V25"
-        Version="1.0.3"
+        Version="1.0.4"
         ModuleName="./Contents/V25/AirenoOS.BricsCAD.Plugin.dll"
         AppDescription="AirenoOS metadata sync (V25)"
         LoadOnAppearance="True"
@@ -51,7 +51,7 @@
     <!-- BricsCAD V26 host — .NET 8 CLR loads this; V25 ignores it (CLR mismatch). -->
     <ComponentEntry
         AppName="AirenoOS.V26"
-        Version="1.0.3"
+        Version="1.0.4"
         ModuleName="./Contents/V26/AirenoOS.BricsCAD.Plugin.dll"
         AppDescription="AirenoOS metadata sync (V26)"
         LoadOnAppearance="True"

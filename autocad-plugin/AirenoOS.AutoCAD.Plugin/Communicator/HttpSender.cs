@@ -24,7 +24,7 @@ namespace AirenoOS.AutoCAD.Plugin.Communicator
         static HttpSender()
         {
             // AutoCAD 2024 runs on .NET Framework 4.8 where ServicePointManager defaults
-            // can leave TLS 1.0 enabled and TLS 1.3 disabled — Cloudflare-fronted endpoints
+            // can leave TLS 1.0 enabled and TLS 1.3 disabled — modern HTTPS endpoints
             // reject those. Force-enable TLS 1.2 + 1.3 (1.3 const exists from .NETFx 4.8)
             // so handshakes succeed across both target frameworks.
             try
@@ -32,7 +32,7 @@ namespace AirenoOS.AutoCAD.Plugin.Communicator
                 ServicePointManager.SecurityProtocol |=
                     SecurityProtocolType.Tls12 | (SecurityProtocolType)12288 /* Tls13 */;
             }
-            catch { /* OS may not support Tls13 — Tls12 alone is enough for Cloudflare */ }
+            catch { /* OS may not support Tls13 — Tls12 alone is enough for modern endpoints */ }
         }
 
         private static readonly HttpClient Client = new HttpClient
